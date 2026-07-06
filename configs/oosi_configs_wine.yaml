@@ -1,0 +1,69 @@
+# Specifiy analysis name
+# Valid options: name to identify .yaml config data file
+ANALYSIS_NAME: wine
+
+# Specify path to data
+# Valid options: path to and name of .xlsx data file
+PATH_TO_DATA: ../sample_data/wine_20240806.xlsx
+
+# Specify sheet name
+# Valid options: sheet name in .xlsx file 
+SHEET_NAME: data
+
+# Specify grouping for CV split
+# Valid options: column name in sheet of .xlsx
+G_NAME: [sample_id]
+
+# Specify predictor name(s)
+# Valid options: column name(s) in sheet of .xlsx
+X_NAMES: [
+    alcohol,
+    malic_acid,
+    ash,
+    alcalinity_of_ash,
+    magnesium,
+    total_phenols,
+    flavanoids,
+    nonflavanoid_phenols,
+    proanthocyanins,
+    color_intensity,
+    hue,
+    od280_od315_of_diluted_wines,
+    proline,
+]
+
+# Specify indices for X_NAMES that indicate continuous numeric variables
+# Valid options: list of integer starting with 0 or empty list
+X_CONTINUOUS_IND: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ,11, 12]
+
+# Specify indices for X_NAMES that indicate binary discrete variables
+# Valid options: list of integer starting with 0 or empty list
+X_BINARY_IND: []
+
+# Specify indices for X_NAMES that indicate low cardinally categorical variables (ONE-HOT ENCODING)
+# Valid options: list of integer starting with 0 or empty list
+X_LOW_CATEGORICAL_IND: []
+
+# Specify indices for X_NAMES that indicate high cardinally categorical variables (TARGET ENCODING)
+# Valid options: list of integer starting with 0 or empty list
+X_HIGH_CATEGORICAL_IND: []
+
+# Specify target name(s)
+# Valid options: column name(s) in sheet of .xlsx
+Y_NAMES: [maker]
+
+# Specify indices for Y_NAMES that indicate continuous numeric variables (REGRESSION)
+# Valid options: list of integer starting with 0 or empty list
+Y_CONTINUOUS_IND: []
+
+# Specify indices for Y_NAMES that indicate binary variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_BINARY_IND: []
+
+# Specify indices for Y_NAMES that indicate multiclass categorical variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_MULTICLASS_IND: [0]
+
+# Define the list of active pipeline configurations to execute sequentially.
+# Each entry contains a label name and its respective pipeline instantiator function.
+PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]

@@ -1,0 +1,62 @@
+# Specifiy analysis name
+# Valid options: name to identify .yaml config data files
+ANALYSIS_NAME: radon
+
+# Specify path to data
+# Valid options: path to and name of .xlsx data file
+PATH_TO_DATA: ../sample_data/radon_20250116.xlsx
+
+# Specify sheet name
+# Valid options: sheet name in .xlsx file 
+SHEET_NAME: data_nan
+
+# Specify grouping for CV split
+# Valid options: column name in sheet of .xlsx
+G_NAME: [sample_id]
+
+# Specify predictor name(s)
+# Valid options: column name(s) in sheet of .xlsx
+X_NAMES: [
+    uppm,
+    basement,
+    floor,
+    region,
+    zip,
+    room,
+]
+
+# Specify indices for X_NAMES that indicate continuous numeric variables
+# Valid options: list of integer starting with 0 or empty list
+X_CONTINUOUS_IND: [0]
+
+# Specify indices for X_NAMES that indicate binary discrete variables
+# Valid options: list of integer starting with 0 or empty list
+X_BINARY_IND: [1, 2]
+
+# Specify indices for X_NAMES that indicate low cardinally categorical variables (ONE-HOT ENCODING)
+# Valid options: list of integer starting with 0 or empty list
+X_LOW_CATEGORICAL_IND: [3, 5]
+
+# Specify indices for X_NAMES that indicate high cardinally categorical variables (TARGET ENCODING)
+# Valid options: list of integer starting with 0 or empty list
+X_HIGH_CATEGORICAL_IND: [4]
+
+# Specify target name(s)
+# Valid options: column name(s) in sheet of .xlsx
+Y_NAMES: [log_radon]
+
+# Specify indices for Y_NAMES that indicate continuous numeric variables (REGRESSION)
+# Valid options: list of integer starting with 0 or empty list
+Y_CONTINUOUS_IND: [0]
+
+# Specify indices for Y_NAMES that indicate binary variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_BINARY_IND: []
+
+# Specify indices for Y_NAMES that indicate multiclass categorical variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_MULTICLASS_IND: []
+
+# Define the list of active pipeline configurations to execute sequentially.
+# Each entry contains a label name and its respective pipeline instantiator function.
+PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]
