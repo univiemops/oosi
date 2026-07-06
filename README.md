@@ -15,6 +15,6 @@ How to install python developer environment for oosi via uv on Windows
 (10) With Powershell uv install packages: 	uv pip install ipywidgets lightgbm openpyxl pyyaml seaborn shapiq spyder-kernels tabicl[shap]  
 (11) Optional if nvidia: 					uv pip install torch --index-url https://download.pytorch.org/whl/cu132 --upgrade  
 (12) In Spyder->Tools->Preferences->Python interpreter->Select interpreter navigate to venv-oosi/Scripts and select python.exe  
-(13) Configure config/oosi_1_mdl_configs_names.yaml  
-(14) Configure config/oosi_1_mdl_configs_<data_name>.yaml  
+(13) Configure config/oosi_configs_names.yaml  
+(14) Configure config/oosi_configs_<data_name>.yaml  
   
