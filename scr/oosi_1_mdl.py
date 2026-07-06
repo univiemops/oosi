@@ -297,7 +297,7 @@ def get_configs_names(file_path: str) -> List[str]:
 def get_configs_file_names(configs_names: List[str]) -> List[str]:
     """Convert configuration names into their respective YAML file paths."""
     config_file_names = [
-        f"../configs/oosi_1_mdl_configs_{name}.yaml" for name in configs_names
+        f"../configs/oosi_configs_{name}.yaml" for name in configs_names
     ]
     for name in config_file_names:
         logging.info(f"Config file name to load: {name}")
@@ -634,7 +634,7 @@ def main() -> None:
     """Coordinate configuration loads, orchestrate loops, and save results."""
     setup_logging()
     document_requirements()
-    configs_names = get_configs_names("../configs/oosi_1_mdl_configs_names.yaml")
+    configs_names = get_configs_names("../configs/oosi_configs_names.yaml")
     configs = get_configs(get_configs_file_names(configs_names))
     pipeline_mapping = {
         "linear": get_linear_estimator_pipeline,
