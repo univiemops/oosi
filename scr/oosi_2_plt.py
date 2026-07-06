@@ -38,7 +38,7 @@ def setup_logging() -> None:
         format="%(asctime)s - %(levelname)s - %(message)s",
         force=True,
     )
-    
+
     # Add console logger
     console_handler = logging.StreamHandler()
     console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")

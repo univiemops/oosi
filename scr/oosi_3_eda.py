@@ -25,7 +25,6 @@ from tabicl import TabICLRegressor
 
 from custom_splitter import RepeatedGroupKFold
 
-
 # Suppress warnings that clog stdout/stderr during rapid solver iterations
 WARNING_MSGS = ["y_pred contains classes not in y_true"]
 for msg in WARNING_MSGS:
@@ -576,7 +575,7 @@ def main() -> None:
             plot_pca(config, y_name, save_path)
 
             plot_outlier_detection(config, y_name, save_path)
-    
+
     logging.info("Exploratory Data Analysis finished.")
 
 
