@@ -767,7 +767,7 @@ def main() -> None:
                             classes=classes,
                             budget=min(
                                 2**n_features,
-                                10 * n_features + math.comb(n_features, 2),
+                                10 * (n_features + math.comb(n_features, 2)),
                             ),
                             n_jobs=1 if pipe_name == "tabicl" else -2,
                         )
