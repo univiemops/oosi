@@ -716,7 +716,7 @@ def main() -> None:
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 
                     x_trn_sample = downsample_if_needed(
-                        arr=x_trn, target_size=100, label="x_trn"
+                        arr=x_trn, target_size=1000, label="x_trn"
                     )
                     x_tst_sample = downsample_if_needed(
                         arr=x_tst, target_size=100, label="x_tst"
