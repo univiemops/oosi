@@ -409,7 +409,7 @@ def get_linear_estimator_pipeline(
             regressor=regressor, transformer=StandardScaler()
         )
         space = {
-            "predictor__regressor__alpha": loguniform(0.01, 10),
+            "predictor__regressor__alpha": loguniform(0.01, 100),
             "predictor__regressor__l1_ratio": uniform(0, 1),
         }
         scorer = "r2"
@@ -418,7 +418,7 @@ def get_linear_estimator_pipeline(
             class_weight="balanced", solver="saga", max_iter=10000, warm_start=True
         )
         space = {
-            "predictor__C": loguniform(0.01, 10),
+            "predictor__C": loguniform(0.01, 100),
             "predictor__l1_ratio": uniform(0, 1),
         }
         scorer = "balanced_accuracy"
@@ -446,7 +446,7 @@ def get_gb_estimator_pipeline(
         "subsample_for_bin": 10000,
         "min_split_gain": 0.0,
         "min_child_weight": 0.00001,
-        "min_child_samples": 1,
+        "min_child_samples": 2,
         "subsample": 1.0,
         "subsample_freq": 0,
         "colsample_bytree": 1.0,
@@ -465,6 +465,7 @@ def get_gb_estimator_pipeline(
         "feature_pre_filter": False,
         "force_col_wise": True,
         "min_data_in_bin": 1,
+        "min_data_in_leaf": 2,
         "verbosity": -1,
     }
 
@@ -476,7 +477,7 @@ def get_gb_estimator_pipeline(
         space = {
             "predictor__regressor__colsample_bytree": uniform(0, 1),
             "predictor__regressor__extra_trees": [True, False],
-            "predictor__regressor__path_smooth": loguniform(1, 100),
+            "predictor__regressor__path_smooth": loguniform(0.1, 100),
         }
         scorer = "r2"
     elif target_type in ("binary", "multiclass"):
