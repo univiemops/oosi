@@ -346,10 +346,10 @@ def get_data(
 
 
 def get_base_preprocessor(
-    config: Dict[str, Any], target_type: str, scale_and_impute: bool = True
+    config: Dict[str, Any], target_type: str, pipe_name: str
 ) -> ColumnTransformer:
     """Helper to assemble the common ColumnTransformer steps."""
-    if scale_and_impute:
+    if pipe_name="linear":
         cont = Pipeline(
             [
                 ("imputer", SimpleImputer(strategy="median")),
@@ -364,28 +364,28 @@ def get_base_preprocessor(
         )
         low_cat = Pipeline(
             [
-                ("imputer", SimpleImputer(strategy="most_frequent")),
                 ("onehot", OneHotEncoder(sparse_output=False, handle_unknown="ignore")),
                 ("scaler", StandardScaler()),
             ]
         )
         high_cat = Pipeline(
             [
-                ("imputer", SimpleImputer(strategy="most_frequent")),
+                ("onehot", OneHotEncoder(sparse_output=False, handle_unknown="ignore")),
+                ("scaler", StandardScaler()),
+            ]
+        )
+    elif pipe_name="gb":
+        cont = Pipeline([("scaler", StandardScaler())])
+        binary = Pipeline([("scaler", StandardScaler())])
+        low_cat = Pipeline([("scaler", StandardScaler())])
+        high_cat = Pipeline(
+            [
                 ("target", TargetEncoder(target_type=target_type)),
                 ("scaler", StandardScaler()),
             ]
         )
     else:
-        cont = Pipeline([("pass", "passthrough")])
-        binary = Pipeline([("pass", "passthrough")])
-        low_cat = Pipeline([("pass", "passthrough")])
-        high_cat = Pipeline(
-            [
-                ("imputer", SimpleImputer(strategy="most_frequent")),
-                ("target", TargetEncoder(target_type=target_type)),
-            ]
-        )
+        raise ValueError(f"Unknown pipe_name: '{pipe_name}' encountered in get_preprocessor.")
 
     return ColumnTransformer(
         [
@@ -401,7 +401,7 @@ def get_linear_estimator_pipeline(
     config: Dict[str, Any], target_type: str, n_classes: int
 ) -> Tuple[Pipeline, Dict[str, Any], str]:
     """Construct a pipeline containing multi-type preprocessors and a linear estimator."""
-    preprocessor = get_base_preprocessor(config, target_type, scale_and_impute=True)
+    preprocessor = get_base_preprocessor(config, target_type, pipe_name="linear")
 
     if target_type == "continuous":
         regressor = ElasticNet(max_iter=10000, warm_start=True, selection="random")
@@ -436,7 +436,7 @@ def get_gb_estimator_pipeline(
     config: Dict[str, Any], target_type: str, n_classes: int
 ) -> Tuple[Pipeline, Dict[str, Any], str]:
     """Construct a pipeline containing preprocessors and a Gradient Boosting estimator."""
-    preprocessor = get_base_preprocessor(config, target_type, scale_and_impute=False)
+    preprocessor = get_base_preprocessor(config, target_type, pipe_name="gb")
     lgbm_params = {
         "boosting_type": "gbdt",
         "num_leaves": 100,
