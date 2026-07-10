@@ -33,7 +33,7 @@ from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNet, LogisticRegression
 from sklearn.metrics import balanced_accuracy_score, mean_absolute_error, r2_score
-from sklearn.model_selection import KFold, StratifiedKFold, RandomizedSearchCV
+from sklearn.model_selection import KFold, RandomizedSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, TargetEncoder
 from sklearn.utils import resample, shuffle

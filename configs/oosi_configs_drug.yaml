@@ -58,5 +58,4 @@ Y_MULTICLASS_IND: [0]
 
 # Define the list of active pipeline configurations to execute sequentially.
 # Each entry contains a label name and its respective pipeline instantiator function.
-# PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]
-PIPELINE_CONFIGS: ["gb"]
+PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]
