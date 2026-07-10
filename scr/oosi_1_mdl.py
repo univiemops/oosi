@@ -33,7 +33,7 @@ from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNet, LogisticRegression
 from sklearn.metrics import balanced_accuracy_score, mean_absolute_error, r2_score
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import KFold, StratifiedKFold, RandomizedSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, TargetEncoder
 from sklearn.utils import resample, shuffle
@@ -345,11 +345,11 @@ def get_data(
     return x_df, y_df, g_df
 
 
-def get_base_preprocessor(
+def get_preprocessor(
     config: Dict[str, Any], target_type: str, pipe_name: str
 ) -> ColumnTransformer:
     """Helper to assemble the common ColumnTransformer steps."""
-    if pipe_name="linear":
+    if pipe_name == "linear":
         cont = Pipeline(
             [
                 ("imputer", SimpleImputer(strategy="median")),
@@ -374,18 +374,53 @@ def get_base_preprocessor(
                 ("scaler", StandardScaler()),
             ]
         )
-    elif pipe_name="gb":
+    elif pipe_name == "gb":
         cont = Pipeline([("scaler", StandardScaler())])
         binary = Pipeline([("scaler", StandardScaler())])
         low_cat = Pipeline([("scaler", StandardScaler())])
         high_cat = Pipeline(
             [
-                ("target", TargetEncoder(target_type=target_type)),
+                (
+                    "target",
+                    TargetEncoder(
+                        target_type=target_type,
+                        cv=(
+                            KFold(n_splits=5, shuffle=True, random_state=None)
+                            if target_type == "continuous"
+                            else StratifiedKFold(
+                                n_splits=5, shuffle=True, random_state=None
+                            )
+                        ),
+                    ),
+                ),
                 ("scaler", StandardScaler()),
             ]
         )
+    elif pipe_name == "tabicl":
+        cont = Pipeline([("passthrough", "passthrough")])
+        binary = Pipeline([("passthrough", "passthrough")])
+        low_cat = Pipeline([("passthrough", "passthrough")])
+        high_cat = Pipeline(
+            [
+                (
+                    "target",
+                    TargetEncoder(
+                        target_type=target_type,
+                        cv=(
+                            KFold(n_splits=5, shuffle=True, random_state=None)
+                            if target_type == "continuous"
+                            else StratifiedKFold(
+                                n_splits=5, shuffle=True, random_state=None
+                            )
+                        ),
+                    ),
+                ),
+            ]
+        )
     else:
-        raise ValueError(f"Unknown pipe_name: '{pipe_name}' encountered in get_preprocessor.")
+        raise ValueError(
+            f"Unknown pipe_name: '{pipe_name}' encountered in get_preprocessor."
+        )
 
     return ColumnTransformer(
         [
@@ -401,7 +436,7 @@ def get_linear_estimator_pipeline(
     config: Dict[str, Any], target_type: str, n_classes: int
 ) -> Tuple[Pipeline, Dict[str, Any], str]:
     """Construct a pipeline containing multi-type preprocessors and a linear estimator."""
-    preprocessor = get_base_preprocessor(config, target_type, pipe_name="linear")
+    preprocessor = get_preprocessor(config, target_type, pipe_name="linear")
 
     if target_type == "continuous":
         regressor = ElasticNet(max_iter=10000, warm_start=True, selection="random")
@@ -436,7 +471,7 @@ def get_gb_estimator_pipeline(
     config: Dict[str, Any], target_type: str, n_classes: int
 ) -> Tuple[Pipeline, Dict[str, Any], str]:
     """Construct a pipeline containing preprocessors and a Gradient Boosting estimator."""
-    preprocessor = get_base_preprocessor(config, target_type, pipe_name="gb")
+    preprocessor = get_preprocessor(config, target_type, pipe_name="gb")
     lgbm_params = {
         "boosting_type": "gbdt",
         "num_leaves": 100,
@@ -470,7 +505,9 @@ def get_gb_estimator_pipeline(
     }
 
     if target_type == "continuous":
-        regressor = LGBMRegressor(objective="huber", **lgbm_params, **extra_params)
+        regressor = LGBMRegressor(
+            objective="mean_squared_error", **lgbm_params, **extra_params
+        )
         predictor = TransformedTargetRegressor(
             regressor=regressor, transformer=StandardScaler()
         )
@@ -490,7 +527,7 @@ def get_gb_estimator_pipeline(
         space = {
             "predictor__colsample_bytree": uniform(0, 1),
             "predictor__extra_trees": [True, False],
-            "predictor__path_smooth": loguniform(1, 100),
+            "predictor__path_smooth": loguniform(0.1, 100),
         }
         scorer = "balanced_accuracy"
     else:
@@ -507,27 +544,33 @@ def get_tabicl_estimator_pipeline(
     config: Dict[str, Any], target_type: str, n_classes: int
 ) -> Tuple[Pipeline, Dict[str, Any], str]:
     """Construct a pipeline containing preprocessors and a TabICL estimator."""
+    preprocessor = get_preprocessor(config, target_type, pipe_name="tabicl")
     if target_type == "continuous":
-        return (
-            TabICLRegressor(
-                kv_cache=True,
-                model_path="../models/tabicl-regressor-v2-20260212.ckpt",
-                random_state=None,
-            ),
-            {},
-            "r2",
+        predictor = TabICLRegressor(
+            n_estimators=10,
+            kv_cache=True,
+            model_path="../models/tabicl-regressor-v2-20260212.ckpt",
+            random_state=None,
         )
+        space = {}
+        scorer = "r2"
     elif target_type in ("binary", "multiclass"):
-        return (
-            TabICLClassifier(
-                kv_cache=True,
-                model_path="../models/tabicl-classifier-v2-20260212.ckpt",
-                random_state=None,
-            ),
-            {},
-            "balanced_accuracy",
+        predictor = TabICLClassifier(
+            n_estimators=10,
+            kv_cache=True,
+            model_path="../models/tabicl-classifier-v2-20260212.ckpt",
+            random_state=None,
         )
-    raise ValueError(f"Unknown target_type: '{target_type}' encountered.")
+        space = {}
+        scorer = "balanced_accuracy"
+    else:
+        raise ValueError(f"Unknown target_type: '{target_type}' encountered.")
+
+    return (
+        Pipeline([("preprocessor", preprocessor), ("predictor", predictor)]),
+        space,
+        scorer,
+    )
 
 
 def get_estimator_scores(
@@ -539,7 +582,6 @@ def get_estimator_scores(
 ) -> Dict[str, Any]:
     """Evaluate performance of the estimator pipeline on holdout test data."""
     y_pred = estimator.predict(x_tst)
-
     return {
         "sample_ind": sample_indices,
         "y_tst": y_tst,
@@ -570,37 +612,23 @@ def explain_pipeline(
     """Calculate feature contribution explanations using Permutation SHAP."""
     if pipe_name == "linear" and target_type in ["binary", "multiclass"]:
         pred_fun = estimator.decision_function
-    elif pipe_name == "gb" and target_type in ["binary", "multiclass"]:
+    elif pipe_name in ["gb", "tabicl"] and target_type in ["binary", "multiclass"]:
         pred_fun = estimator.predict_proba
     else:
         pred_fun = estimator
     explanations = {}
     for c_class in classes:
-        if pipe_name in ["linear", "gb"]:
-            explainer = shapiq.explainer.TabularExplainer(
-                model=pred_fun,
-                data=x_trn,
-                class_index=c_class,
-                imputer="marginal",
-                approximator="auto",
-                index="k-SII",
-                max_order=2,
-                random_state=None,
-                verbose=False,
-            )
-        elif pipe_name == "tabicl":
-            explainer = get_shapiq_explainer(
-                estimator=pred_fun,
-                data=x_trn,
-                class_index=c_class,
-                imputer="nan",
-                index="k-SII",
-                max_order=2,
-                random_state=None,
-            )
-        else:
-            raise ValueError(f"Pipeline name {pipe_name} was not in linear/gb/tabicl.")
-
+        explainer = shapiq.explainer.TabularExplainer(
+            model=pred_fun,
+            data=x_trn,
+            class_index=c_class,
+            imputer="marginal",
+            approximator="auto",
+            index="k-SII",
+            max_order=2,
+            random_state=None,
+            verbose=False,
+        )
         explanations[c_class] = explainer.explain_X(x_tst, n_jobs=n_jobs, budget=budget)
     return explanations
 
@@ -700,7 +728,7 @@ def main() -> None:
                 total_best_params = []
                 total_x_tst_sample_shapiq = []
 
-                cv = RepeatedGroupKFold(n_splits=5, n_repeats=20, random_state=3141592)
+                cv = RepeatedGroupKFold(n_splits=5, n_repeats=6, random_state=3141592)
 
                 for fold_idx, (train_idx, test_idx) in enumerate(
                     cv.split(x_df, y=y_df, groups=g_df)
@@ -717,7 +745,7 @@ def main() -> None:
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 
                     x_trn_sample = downsample_if_needed(
-                        arr=x_trn, target_size=1000, label="x_trn"
+                        arr=x_trn, target_size=100, label="x_trn"
                     )
                     x_tst_sample = downsample_if_needed(
                         arr=x_tst, target_size=100, label="x_tst"
@@ -733,7 +761,7 @@ def main() -> None:
                             n_iter=100,
                             scoring=scorer,
                             n_jobs=-2,
-                            cv=RepeatedGroupKFold(n_splits=5, n_repeats=20),
+                            cv=RepeatedGroupKFold(n_splits=5, n_repeats=6),
                         ).fit(X=x_trn, y=y_trn, groups=g_trn)
                         total_best_params.append(search.best_params_)
                         for k, v in search.best_params_.items():

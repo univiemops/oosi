@@ -1,0 +1,17 @@
+2026-07-09 14:01:49,351 - INFO - Logging established
+2026-07-09 14:01:49,353 - INFO - Logs save at: ../logs/oosi_3_eda.log
+2026-07-09 14:01:49,400 - INFO - OS: Windows 11
+2026-07-09 14:01:49,400 - INFO - Python Version: 3.13.13
+2026-07-09 14:01:49,401 - INFO - Dependencies save at: ../logs/requirements_oosi_3_eda.txt
+2026-07-09 14:01:49,402 - INFO - Config names loaded: radon
+2026-07-09 14:01:49,402 - INFO - Config file name to load: ../configs/oosi_configs_radon.yaml
+2026-07-09 14:01:49,568 - INFO - Config and data loaded: ../configs/oosi_configs_radon.yaml
+2026-07-09 14:01:49,569 - INFO - Exploratory Data Analysis started: radon__log_radon
+2026-07-09 14:01:49,571 - INFO - 1D Data Distributions.
+2026-07-09 14:01:49,572 - INFO - Data sliced for log_radon.
+2026-07-09 14:01:50,046 - INFO - 2D Data Distributions.
+2026-07-09 14:01:50,052 - INFO - Data sliced for log_radon.
+2026-07-09 14:01:56,799 - INFO - Linear Joint Information (Correlation Heatmap).
+2026-07-09 14:01:56,800 - INFO - Data sliced for log_radon.
+2026-07-09 14:01:57,081 - INFO - Pairwise Prediction Heatmap via TabICL.
+2026-07-09 14:01:57,081 - INFO - Data sliced for log_radon.

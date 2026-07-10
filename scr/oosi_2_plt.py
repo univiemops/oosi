@@ -109,17 +109,17 @@ def plot_parameter_distributions(results: dict, store_path: str) -> None:
         ax.set_ylabel("Count")
         # Set x range
         if name.endswith("colsample_bytree"):
-            ax.set_xlim([0, 1])
+            ax.set_xlim([-0.05, 1.05])
         elif name.endswith("extra_trees"):
-            ax.set_xlim([-0.1, 1.1])
+            ax.set_xlim([-0.05, 1.05])
         elif name.endswith("path_smooth"):
             ax.set_xlim([0.1, 100])
         elif name.endswith("alpha"):
-            ax.set_xlim([0.01, 10])
+            ax.set_xlim([0.01, 100])
         elif name.endswith("C"):
-            ax.set_xlim([0.01, 10])
+            ax.set_xlim([0.01, 100])
         elif name.endswith("l1_ratio"):
-            ax.set_xlim([0, 1])
+            ax.set_xlim([-0.05, 1.05])
         # Make title string
         title_str = (
             f"{results['config']['ANALYSIS_NAME']} ({results['params']['pipe_name']} estimator predicting {results['params']['y_name']})\n"

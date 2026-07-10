@@ -1,0 +1,38 @@
+2026-07-10 12:07:50,685 - INFO - Logging established
+2026-07-10 12:07:50,687 - INFO - Logs save at: ../logs/oosi_2_plt.log
+2026-07-10 12:07:50,687 - INFO - Plotting started.
+2026-07-10 12:07:50,730 - INFO - OS: Windows 11
+2026-07-10 12:07:50,731 - INFO - Python Version: 3.13.13
+2026-07-10 12:07:50,731 - INFO - Dependencies save at: ../logs/requirements_oosi_2_plt.txt
+2026-07-10 12:07:50,732 - INFO - Target found: drug__drug
+2026-07-10 12:07:50,732 - INFO - Target found: radon__log_radon
+2026-07-10 12:07:50,732 - INFO - Estimator found: gb
+2026-07-10 12:07:50,733 - INFO - Result found: config.pkl
+2026-07-10 12:07:50,733 - INFO - Result found: params.pkl
+2026-07-10 12:07:50,734 - INFO - Result found: total_best_params-a471-u056-2.pkl
+2026-07-10 12:07:50,887 - INFO - Result found: total_best_params-a471-u056-3.pkl
+2026-07-10 12:07:51,045 - INFO - Result found: total_best_params-a471-u056.pkl
+2026-07-10 12:07:51,189 - INFO - Result found: total_best_params-a471-u102.pkl
+2026-07-10 12:07:51,190 - INFO - Result found: total_best_params.pkl
+2026-07-10 12:07:51,191 - INFO - Result found: total_scores-a471-u056-2.pkl
+2026-07-10 12:07:51,346 - INFO - Result found: total_scores-a471-u056-3.pkl
+2026-07-10 12:07:51,536 - INFO - Result found: total_scores-a471-u056.pkl
+2026-07-10 12:07:51,694 - INFO - Result found: total_scores-a471-u102.pkl
+2026-07-10 12:07:51,695 - INFO - Result found: total_scores.pkl
+2026-07-10 12:07:51,695 - INFO - Result found: total_scores_sh-a471-u056-2.pkl
+2026-07-10 12:07:51,854 - INFO - Result found: total_scores_sh-a471-u056-3.pkl
+2026-07-10 12:07:52,011 - INFO - Result found: total_scores_sh-a471-u056.pkl
+2026-07-10 12:07:52,187 - INFO - Result found: total_scores_sh-a471-u102.pkl
+2026-07-10 12:07:52,188 - INFO - Result found: total_scores_sh.pkl
+2026-07-10 12:07:52,188 - INFO - Result found: total_shapii.pkl
+2026-07-10 12:07:52,189 - INFO - Result found: total_shapii_sh.pkl
+2026-07-10 12:07:52,189 - INFO - Result found: total_x_tst_sample_shapiq-a471-u056-2.pkl
+2026-07-10 12:07:52,393 - INFO - Result found: total_x_tst_sample_shapiq-a471-u056-3.pkl
+2026-07-10 12:07:52,553 - INFO - Result found: total_x_tst_sample_shapiq-a471-u056.pkl
+2026-07-10 12:07:52,774 - INFO - Result found: total_x_tst_sample_shapiq-a471-u102.pkl
+2026-07-10 12:07:52,775 - INFO - Result found: total_x_tst_sample_shapiq.pkl
+2026-07-10 12:07:52,776 - INFO - Plot optimized parameter distribution.
+2026-07-10 12:07:53,343 - INFO - Plot model fit.
+2026-07-10 12:07:53,664 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-10 12:07:53,665 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-07-10 12:07:53,762 - INFO - Plot average SHAP values.

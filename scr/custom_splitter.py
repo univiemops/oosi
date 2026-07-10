@@ -9,7 +9,11 @@ import math
 from itertools import combinations
 import numpy as np
 from sklearn.utils.validation import check_array, check_random_state
-from sklearn.model_selection._split import _BaseKFold, _RepeatedSplits, BaseCrossValidator
+from sklearn.model_selection._split import (
+    _BaseKFold,
+    _RepeatedSplits,
+    BaseCrossValidator,
+)
 from sklearn.model_selection import GroupShuffleSplit
 
 
@@ -224,9 +228,9 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
     Group Shuffle Split with non-repeating group assignments in the test set,
     sub-sampling of test set groups, and training set injection.
 
-    This splitter partitions the data by assigning combinations of unique groups 
-    to either the train or test set. To ensure balanced coverage of groups and prevent 
-    redundancies, it enforces that there are no repeating combinations of groups assigned 
+    This splitter partitions the data by assigning combinations of unique groups
+    to either the train or test set. To ensure balanced coverage of groups and prevent
+    redundancies, it enforces that there are no repeating combinations of groups assigned
     to the test set across splits until the maximum possible combinations are exhausted.
 
     Once test groups are chosen, it sub-samples them keeping only `n_test_samples`
@@ -263,7 +267,7 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
     >>> X = np.array([[10], [20], [30], [40], [50], [60], [70], [80], [90], [100], [110], [120], [130], [140], [150], [160], [170]])
     >>> y = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])
     >>> groups = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4])
-    >>> 
+    >>>
     >>> # 1. Test case: fallback to leave one group out
     >>> gss = CustomGroupShuffleSplit(n_splits=5, test_size=1, n_test_samples="all", random_state=3141592)
     >>> for i, (train_index, test_index) in enumerate(gss.split(X, y, groups)):
@@ -285,7 +289,7 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
     Fold 4:
       Train: index=[ 3  4  5  6  7  8  9 10 11 12 13 14 15 16], group=[1 1 1 2 2 2 3 3 3 3 4 4 4 4]
       Test:  index=[0 1 2], group=[0 0 0]
-    >>> 
+    >>>
     >>> # 2. Test case: fallback to leave p groups out
     >>> gss_all = CustomGroupShuffleSplit(n_splits=3, test_size=2, n_test_samples="all", random_state=3141592)
     >>> for i, (train_index, test_index) in enumerate(gss_all.split(X, y, groups)):
@@ -301,7 +305,7 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
     Fold 2:
       Train: index=[ 0  1  2  6  7  8 13 14 15 16], group=[0 0 0 2 2 2 4 4 4 4]
       Test:  index=[ 3  4  5  9 10 11 12], group=[1 1 1 3 3 3 3]
-    >>> 
+    >>>
     >>> # 3. Test case: only two random samples per group in test set
     >>> gss_sub = CustomGroupShuffleSplit(n_splits=3, test_size=2, n_test_samples=2, n_train_samples_back=0, random_state=3141592)
     >>> for i, (train_index, test_index) in enumerate(gss_sub.split(X, y, groups)):
@@ -317,7 +321,7 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
     Fold 2:
       Train: index=[ 0  1  2  6  7  8 13 14 15 16], group=[0 0 0 2 2 2 4 4 4 4]
       Test:  index=[ 3  4 10 12], group=[1 1 3 3]
-    >>> 
+    >>>
     >>> # 4. Test case: only two random samples per group in test set and up to two samples send back to training set
     >>> gss_inject = CustomGroupShuffleSplit(n_splits=2, test_size=2, n_test_samples=2, n_train_samples_back=2, random_state=3141592)
     >>> for i, (train_index, test_index) in enumerate(gss_inject.split(X, y, groups)):
@@ -374,7 +378,7 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
             The testing set indices for that split.
         """
         groups = _validate_groups(groups)
-        
+
         # Parameter validation
         if not (isinstance(self.n_test_samples, int) or self.n_test_samples == "all"):
             raise ValueError("n_test_samples must be an integer or 'all'.")
@@ -391,10 +395,10 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
         # Parse test_size and train_size with respect to group counts
         test_size = self.test_size
         train_size = self.train_size
-        
+
         if test_size is None and train_size is None:
             test_size = 0.2
-            
+
         if test_size is not None:
             if isinstance(test_size, (int, np.integer)):
                 if test_size >= n_groups or test_size <= 0:
@@ -446,29 +450,31 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
             )
 
         rng = check_random_state(self.random_state)
-        
+
         # Calculate maximum possible combinations C = n_groups choose n_test
         C = math.comb(n_groups, n_test)
-        
+
         selected_combos = []
         if C <= 10000:
             # Generate all possible test group combinations, shuffle, and take first n_splits
             all_combos = list(combinations(sorted(unique_groups), n_test))
             rng.shuffle(all_combos)
-            
+
             for i in range(self.n_splits):
                 selected_combos.append(all_combos[i % C])
         else:
             # Rejection sampling for unique combinations to prevent memory overflow
             used = set()
             target_unique = min(self.n_splits, C)
-            
+
             while len(selected_combos) < target_unique:
-                combo = tuple(sorted(rng.choice(unique_groups, size=n_test, replace=False)))
+                combo = tuple(
+                    sorted(rng.choice(unique_groups, size=n_test, replace=False))
+                )
                 if combo not in used:
                     used.add(combo)
                     selected_combos.append(combo)
-            
+
             # If splits exceed maximum unique combinations, cycle them
             if self.n_splits > len(selected_combos):
                 extended = []
@@ -480,12 +486,16 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
         for split_idx in range(self.n_splits):
             test_groups_combo = selected_combos[split_idx]
             test_groups_set = set(test_groups_combo)
-            
+
             # Remaining groups available for train set
-            remaining_groups = np.array([g for g in unique_groups if g not in test_groups_set])
-            
+            remaining_groups = np.array(
+                [g for g in unique_groups if g not in test_groups_set]
+            )
+
             if n_train < len(remaining_groups):
-                train_groups_combo = rng.choice(remaining_groups, size=n_train, replace=False)
+                train_groups_combo = rng.choice(
+                    remaining_groups, size=n_train, replace=False
+                )
             else:
                 train_groups_combo = remaining_groups
 
@@ -506,7 +516,7 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
             for g in unique_test_groups:
                 g_indices = np.where(groups == g)[0]
                 shuffled_g_indices = rng.permutation(g_indices)
-                
+
                 n_total = len(shuffled_g_indices)
                 n_test_sel = min(self.n_test_samples, n_total)
 
@@ -524,7 +534,9 @@ class CustomGroupShuffleSplit(GroupShuffleSplit):
                     new_train_back_indices.extend(g_back)
 
             if new_train_back_indices:
-                final_train_index = np.concatenate([train_index, new_train_back_indices])
+                final_train_index = np.concatenate(
+                    [train_index, new_train_back_indices]
+                )
                 final_train_index.sort()
             else:
                 final_train_index = train_index.copy()
