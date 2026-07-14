@@ -109,7 +109,7 @@ def plot_parameter_distributions(results: dict, store_path: str) -> None:
         ax.set_ylabel("Count")
         # Set x range
         if name.endswith("colsample_bytree"):
-            ax.set_xlim([-0.05, 1.05])
+            ax.set_xlim([0.05, 1.05])
         elif name.endswith("extra_trees"):
             ax.set_xlim([-0.05, 1.05])
         elif name.endswith("path_smooth"):

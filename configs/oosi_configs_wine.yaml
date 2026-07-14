@@ -40,13 +40,9 @@ X_CONTINUOUS_IND: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ,11, 12]
 # Valid options: list of integer starting with 0 or empty list
 X_BINARY_IND: []
 
-# Specify indices for X_NAMES that indicate low cardinally categorical variables (ONE-HOT ENCODING)
+# Specify indices for X_NAMES that indicate multi categorical variables (TARGET ENCODING or ONE HOT ENCODING)
 # Valid options: list of integer starting with 0 or empty list
-X_LOW_CATEGORICAL_IND: []
-
-# Specify indices for X_NAMES that indicate high cardinally categorical variables (TARGET ENCODING)
-# Valid options: list of integer starting with 0 or empty list
-X_HIGH_CATEGORICAL_IND: []
+X_MULTICAT_IND: []
 
 # Specify target name(s)
 # Valid options: column name(s) in sheet of .xlsx

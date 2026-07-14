@@ -23,11 +23,12 @@ from typing import Any, Dict, List, Tuple
 import multiprocessing as mp
 import numpy as np
 import pandas as pd
-import shapiq
 import torch
 import yaml
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, uniform
+from shapiq.explainer import TabularExplainer, TreeExplainer
+from shapiq.interaction_values import InteractionValues
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.impute import SimpleImputer
@@ -362,13 +363,7 @@ def get_preprocessor(
                 ("scaler", StandardScaler()),
             ]
         )
-        low_cat = Pipeline(
-            [
-                ("onehot", OneHotEncoder(sparse_output=False, handle_unknown="ignore")),
-                ("scaler", StandardScaler()),
-            ]
-        )
-        high_cat = Pipeline(
+        cat = Pipeline(
             [
                 ("onehot", OneHotEncoder(sparse_output=False, handle_unknown="ignore")),
                 ("scaler", StandardScaler()),
@@ -377,8 +372,7 @@ def get_preprocessor(
     elif pipe_name == "gb":
         cont = Pipeline([("scaler", StandardScaler())])
         binary = Pipeline([("scaler", StandardScaler())])
-        low_cat = Pipeline([("scaler", StandardScaler())])
-        high_cat = Pipeline(
+        cat = Pipeline(
             [
                 (
                     "target",
@@ -399,8 +393,7 @@ def get_preprocessor(
     elif pipe_name == "tabicl":
         cont = Pipeline([("passthrough", "passthrough")])
         binary = Pipeline([("passthrough", "passthrough")])
-        low_cat = Pipeline([("passthrough", "passthrough")])
-        high_cat = Pipeline(
+        cat = Pipeline(
             [
                 (
                     "target",
@@ -426,8 +419,7 @@ def get_preprocessor(
         [
             ("cont", cont, config["X_CONTINUOUS_IND"]),
             ("bin", binary, config["X_BINARY_IND"]),
-            ("low_cat", low_cat, config["X_LOW_CATEGORICAL_IND"]),
-            ("high_cat", high_cat, config["X_HIGH_CATEGORICAL_IND"]),
+            ("cat", cat, config["X_MULTICAT_IND"]),
         ]
     )
 
@@ -525,7 +517,7 @@ def get_gb_estimator_pipeline(
             **{**extra_params, "num_class": n_classes},
         )
         space = {
-            "predictor__colsample_bytree": uniform(0, 1),
+            "predictor__colsample_bytree": uniform(0.1, 0.9),
             "predictor__extra_trees": [True, False],
             "predictor__path_smooth": loguniform(0.1, 100),
         }
@@ -545,6 +537,7 @@ def get_tabicl_estimator_pipeline(
 ) -> Tuple[Pipeline, Dict[str, Any], str]:
     """Construct a pipeline containing preprocessors and a TabICL estimator."""
     preprocessor = get_preprocessor(config, target_type, pipe_name="tabicl")
+
     if target_type == "continuous":
         predictor = TabICLRegressor(
             n_estimators=10,
@@ -582,6 +575,7 @@ def get_estimator_scores(
 ) -> Dict[str, Any]:
     """Evaluate performance of the estimator pipeline on holdout test data."""
     y_pred = estimator.predict(x_tst)
+
     return {
         "sample_ind": sample_indices,
         "y_tst": y_tst,
@@ -599,6 +593,75 @@ def get_estimator_scores(
     }
 
 
+def group_features(
+    iv: InteractionValues, features_to_group: list[int] or set[int], new_feature_id: int
+) -> InteractionValues:
+    """
+    Groups a specified subset of features into a single unified feature
+    for an InteractionValues object (handles order 2 k-SII).
+
+    Args:
+        iv: The original shapiq InteractionValues object.
+        features_to_group: Iterable of feature indices (ints) to group together.
+        new_feature_id: The new integer index to assign to the grouped feature.
+
+    Returns:
+        A new InteractionValues object with grouped values.
+    """
+    group = set(features_to_group)
+    new_values = {}
+
+    # 1. Initialize the new grouped main effect
+    grouped_main_effect = 0.0
+
+    # 2. Track interactions with outside features
+    outside_interactions = {}
+
+    for subset, value in iv.dict_values.items():
+        subset_set = set(subset)
+        intersection = subset_set.intersection(group)
+
+        # Case A: The subset is entirely contained within the grouping list
+        if subset_set.issubset(group):
+            grouped_main_effect += value
+        # Case B: The subset contains elements both inside and outside the group
+        elif len(intersection) > 0:
+            outside_elements = subset_set.difference(group)
+            if len(outside_elements) == 1:
+                outside_feat = list(outside_elements)[0]
+                outside_interactions[outside_feat] = (
+                    outside_interactions.get(outside_feat, 0.0) + value
+                )
+        # Case C: The subset has absolutely nothing to do with the grouped features
+        else:
+            new_values[subset] = value
+
+    # Add the newly computed macro-player main effect
+    new_values[(new_feature_id,)] = grouped_main_effect
+
+    # Add the collapsed second-order interactions with outside features
+    for outside_feat, total_val in outside_interactions.items():
+        new_subset = tuple(sorted([new_feature_id, outside_feat]))
+        new_values[new_subset] = total_val
+
+    # Grab the baseline value from the original object
+    baseline_val = iv.baseline_value
+
+    # FIX: Use n_players instead of n_features
+    new_n_players = iv.n_players - len(group) + 1
+
+    # Return the freshly minted shapiq object
+    return InteractionValues(
+        values=new_values,
+        index=iv.index,
+        max_order=iv.max_order,
+        min_order=iv.min_order,
+        n_players=new_n_players,  # Adjusted initialization parameter
+        baseline_value=baseline_val,
+        estimation_budget=iv.estimation_budget,
+    )
+
+
 def explain_pipeline(
     estimator: Pipeline,
     x_trn: np.ndarray,
@@ -606,36 +669,85 @@ def explain_pipeline(
     pipe_name: str,
     target_type: str,
     classes: List[Any] = None,
-    budget: int = None,
-    n_jobs: int = 1,
+    cat_ind: List[Any] = None,
 ) -> Dict[Any, Any]:
     """Calculate feature contribution explanations using Permutation SHAP."""
+
     if pipe_name == "linear" and target_type in ["binary", "multiclass"]:
         pred_fun = estimator.decision_function
-    elif pipe_name in ["gb", "tabicl"] and target_type in ["binary", "multiclass"]:
+    elif pipe_name == "gb" and target_type in ["binary", "multiclass"]:
         pred_fun = estimator.predict_proba
     else:
         pred_fun = estimator
+
     explanations = {}
     for c_class in classes:
-        explainer = shapiq.explainer.TabularExplainer(
-            model=pred_fun,
-            data=x_trn,
-            class_index=c_class,
-            imputer="marginal",
-            approximator="auto",
-            index="k-SII",
-            max_order=2,
-            random_state=None,
-            verbose=False,
-        )
-        explanations[c_class] = explainer.explain_X(x_tst, n_jobs=n_jobs, budget=budget)
+
+        if pipe_name in ["linear", "gb"]:
+            explainer = TabularExplainer(
+                model=pred_fun,
+                data=x_trn,
+                class_index=c_class,
+                imputer="marginal",
+                approximator="auto",
+                index="k-SII",
+                max_order=2,
+                random_state=None,
+                verbose=False,
+            )
+            n_features = estimator[0].transform(x_tst).shape[1]
+            explanations[c_class] = explainer.explain_X(
+                x_tst,
+                n_jobs=-2,
+                budget=min(
+                    2**n_features,
+                    10 * n_features + math.comb(n_features, 2),
+                ),
+            )
+        elif pipe_name == "tabicl":
+            explainer = get_shapiq_explainer(
+                estimator=estimator[1],
+                data=estimator[0].transform(x_trn),
+                imputer="nan",
+                index="k-SII",
+                max_order=2,
+                class_index=c_class,
+            )
+            n_features = estimator[0].transform(x_tst).shape[1]
+            explanations[c_class] = explainer.explain_X(
+                estimator[0].transform(x_tst),
+                n_jobs=1,
+                budget=min(
+                    2**n_features,
+                    10 * n_features + math.comb(n_features, 2),
+                ),
+            )
+
+    if target_type == "multiclass" and pipe_name in ["gb", "tabicl"]:
+        n_cat = len(cat_ind)
+        n_features_orig = x_trn.shape[1]
+        for num, _ in enumerate(cat_ind):
+            new_ind = n_features_orig - (n_cat - num)
+            start_ind = n_features - ((n_cat - num) * len(classes))
+            end_ind = start_ind + len(classes)
+            group_ind = list(range(start_ind, end_ind))
+            explanations_new = {}
+            for key in explanations.keys():
+                iv_list = []
+                for iv in explanations[key]:
+                    iv_list.append(
+                        group_features(
+                            iv=iv, features_to_group=group_ind, new_feature_id=new_ind
+                        )
+                    )
+                explanations[key] = iv_list
     return explanations
 
 
 def log_metrics(scores_list: List[Dict[str, Any]], prefix: str = "") -> None:
     """Helper layout for clean and centralized metrics evaluation output logs."""
     label = f"Avg {prefix}".strip()
+
     if scores_list[0]["target_type"] == "continuous":
         logging.info(
             f"{label} Mean Absolute Error (MAE): {np.mean([i['mae'] for i in scores_list]):.2f}"
@@ -652,6 +764,7 @@ def log_metrics(scores_list: List[Dict[str, Any]], prefix: str = "") -> None:
 def downsample_if_needed(arr: np.ndarray, target_size: int, label: str) -> np.ndarray:
     """Drops rows containing NaNs, then applies scikit-learn random structural data subsetting allocations."""
     # Downsample if the remaining clean rows still exceed target_size
+
     if arr.shape[0] > target_size:
         logging.info(f"{label} downsampled to {target_size} samples for shapiq")
         return resample(arr, replace=False, n_samples=target_size)
@@ -745,7 +858,7 @@ def main() -> None:
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 
                     x_trn_sample = downsample_if_needed(
-                        arr=x_trn, target_size=100, label="x_trn"
+                        arr=x_trn, target_size=1000, label="x_trn"
                     )
                     x_tst_sample = downsample_if_needed(
                         arr=x_tst, target_size=100, label="x_tst"
@@ -793,11 +906,7 @@ def main() -> None:
                             pipe_name=pipe_name,
                             target_type=target_type,
                             classes=classes,
-                            budget=min(
-                                2**n_features,
-                                10 * (n_features + math.comb(n_features, 2)),
-                            ),
-                            n_jobs=1 if pipe_name == "tabicl" else -2,
+                            cat_ind=config["X_MULTICAT_IND"],
                         )
                         tracking[suffix][1].append(shap_data)
 

@@ -362,9 +362,7 @@ def plot_pair_predictions(config: dict, y_name: str, store_path: str) -> None:
             column_objectives[col] = "continuous"
         elif idx in config["X_BINARY_IND"]:
             column_objectives[col] = "categorical"
-        elif idx in config["X_LOW_CATEGORICAL_IND"]:
-            column_objectives[col] = "categorical"
-        elif idx in config["X_HIGH_CATEGORICAL_IND"]:
+        elif idx in config["X_MULTICAT_IND"]:
             column_objectives[col] = "categorical"
         else:
             raise ValueError(f"Index {idx} not in X_IND.")
