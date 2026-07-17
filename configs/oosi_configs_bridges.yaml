@@ -1,0 +1,59 @@
+# Specifiy analysis name
+# Valid options: name to identify .yaml config data file
+ANALYSIS_NAME: bridges
+
+# Specify path to data
+# Valid options: path to and name of .xlsx data file
+PATH_TO_DATA: ../sample_data/bridges_20260717.xlsx
+
+# Specify sheet name
+# Valid options: sheet name in .xlsx file 
+SHEET_NAME: data_nan
+
+# Specify grouping for CV split
+# Valid options: column name in sheet of .xlsx
+G_NAME: [sample_id]
+
+# Specify predictor name(s)
+# Valid options: column name(s) in sheet of .xlsx
+X_NAMES: [
+    river,
+    erected,
+    purpose,
+    length,
+    lanes,
+    material,
+    span,
+]
+
+# Specify indices for X_NAMES that indicate continuous numeric variables
+# Valid options: list of integer starting with 0 or empty list
+X_CONTINUOUS_IND: [1, 3]
+
+# Specify indices for X_NAMES that indicate binary discrete variables
+# Valid options: list of integer starting with 0 or empty list
+X_BINARY_IND: []
+
+# Specify indices for X_NAMES that indicate multi categorical variables (TARGET ENCODING or ONE HOT ENCODING)
+# Valid options: list of integer starting with 0 or empty list
+X_MULTICAT_IND: [0, 2, 4, 5, 6]
+
+# Specify target name(s)
+# Valid options: column name(s) in sheet of .xlsx
+Y_NAMES: [type]
+
+# Specify indices for Y_NAMES that indicate continuous numeric variables (REGRESSION)
+# Valid options: list of integer starting with 0 or empty list
+Y_CONTINUOUS_IND: []
+
+# Specify indices for Y_NAMES that indicate binary variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_BINARY_IND: []
+
+# Specify indices for Y_NAMES that indicate multiclass categorical variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_MULTICLASS_IND: [0]
+
+# Define the list of active pipeline configurations to execute sequentially.
+# Each entry contains a label name and its respective pipeline instantiator function.
+PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]

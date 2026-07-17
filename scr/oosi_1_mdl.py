@@ -49,11 +49,19 @@ from custom_splitter import RepeatedGroupKFold
 WARNING_MSGS = [
     "y_pred contains classes not in y_true",
     "The max_iter was reached",
-    "X does not have valid feature",
+    "X does not have valid feature names",
+    "Not all budget is required",
+    "The least populated class in y has only",
+    "The sample size is larger than the number",
 ]
+
+# For subprocesses (os.environ)
+env_rules = [f"ignore:{msg}" for msg in WARNING_MSGS]
+os.environ["PYTHONWARNINGS"] = ",".join(env_rules)
+
+# For current main process
 for msg in WARNING_MSGS:
-    os.environ["PYTHONWARNINGS"] = f"ignore:{msg}:::"
-    warnings.filterwarnings("ignore", message=msg)
+    warnings.filterwarnings("ignore", message=f".*{msg}.*")
 
 
 # Monkey patching TabICLClassifier for predict_logits
@@ -598,7 +606,7 @@ def group_features(
 ) -> InteractionValues:
     """
     Groups a specified subset of features into a single unified feature
-    for an InteractionValues object (handles order 2 k-SII).
+    for an InteractionValues object, supporting arbitrary interaction orders (k-SII).
 
     Args:
         iv: The original shapiq InteractionValues object.
@@ -606,59 +614,99 @@ def group_features(
         new_feature_id: The new integer index to assign to the grouped feature.
 
     Returns:
-        A new InteractionValues object with grouped values.
+        A new InteractionValues object with grouped values across all orders.
     """
     group = set(features_to_group)
     new_values = {}
-
-    # 1. Initialize the new grouped main effect
-    grouped_main_effect = 0.0
-
-    # 2. Track interactions with outside features
-    outside_interactions = {}
 
     for subset, value in iv.dict_values.items():
         subset_set = set(subset)
         intersection = subset_set.intersection(group)
 
-        # Case A: The subset is entirely contained within the grouping list
-        if subset_set.issubset(group):
-            grouped_main_effect += value
-        # Case B: The subset contains elements both inside and outside the group
-        elif len(intersection) > 0:
-            outside_elements = subset_set.difference(group)
-            if len(outside_elements) == 1:
-                outside_feat = list(outside_elements)[0]
-                outside_interactions[outside_feat] = (
-                    outside_interactions.get(outside_feat, 0.0) + value
-                )
-        # Case C: The subset has absolutely nothing to do with the grouped features
+        # Case A: The subset has no elements inside the grouped features
+        if len(intersection) == 0:
+            new_values[subset] = new_values.get(subset, 0.0) + value
+        # Case B: The subset contains elements of the group (any order)
         else:
-            new_values[subset] = value
-
-    # Add the newly computed macro-player main effect
-    new_values[(new_feature_id,)] = grouped_main_effect
-
-    # Add the collapsed second-order interactions with outside features
-    for outside_feat, total_val in outside_interactions.items():
-        new_subset = tuple(sorted([new_feature_id, outside_feat]))
-        new_values[new_subset] = total_val
+            # Remove grouped features and replace them with the single macro-player
+            outside_elements = subset_set.difference(group)
+            new_subset = tuple(sorted(list(outside_elements) + [new_feature_id]))
+            new_values[new_subset] = new_values.get(new_subset, 0.0) + value
 
     # Grab the baseline value from the original object
     baseline_val = iv.baseline_value
 
-    # FIX: Use n_players instead of n_features
+    # Use n_players instead of n_features
     new_n_players = iv.n_players - len(group) + 1
+
+    # Determine the new minimum order dynamically based on the resulting dictionary keys
+    new_min_order = min(len(k) for k in new_values.keys()) if new_values else iv.min_order
 
     # Return the freshly minted shapiq object
     return InteractionValues(
         values=new_values,
         index=iv.index,
         max_order=iv.max_order,
-        min_order=iv.min_order,
-        n_players=new_n_players,  # Adjusted initialization parameter
+        min_order=new_min_order,
+        n_players=new_n_players,
         baseline_value=baseline_val,
         estimation_budget=iv.estimation_budget,
+    )
+
+
+def reorder_interaction_values(
+    iv: InteractionValues, indices: List[int]
+) -> InteractionValues:
+    """
+    Resorts the players in an InteractionValues object to fit their original positions.
+
+    This maps the current player indices (0, 1, ..., n-1) to their original sequence positions
+    specified in `indices` (where player i is mapped to indices[i]), sorting each subset 
+    to preserve canonical shapiq ordering.
+
+    Args:
+        iv: The original shapiq InteractionValues object.
+        indices: A list of integers giving the original positions for the current players.
+                 e.g. [1, 3, 0, 2, 4, 5, 6]
+
+    Returns:
+        A new InteractionValues object with rearranged and sorted players.
+    """
+    new_values = {}
+    n_players_current = iv.n_players
+
+    # Validation check
+    if len(indices) < n_players_current:
+        raise ValueError(
+            f"The length of the indices list ({len(indices)}) must be at least "
+            f"the number of players in the InteractionValues object ({n_players_current})."
+        )
+
+    for subset, value in iv.dict_values.items():
+        # Map each player index in the subset to its original index in the list
+        # Sorted to ensure standard canonical subset order required by shapiq
+        try:
+            new_subset = tuple(sorted(indices[p] for p in subset))
+        except IndexError as e:
+            raise IndexError(
+                f"Player index in subset {subset} is out of bounds for the provided indices list."
+            ) from e
+        new_values[new_subset] = value
+
+    # Retrieve other metadata with safe fallbacks
+    baseline_val = getattr(iv, "baseline_value", 0.0)
+    est_budget = getattr(iv, "estimation_budget", None)
+    is_estimated = getattr(iv, "estimated", False)
+
+    return InteractionValues(
+        values=new_values,
+        index=iv.index,
+        max_order=iv.max_order,
+        min_order=iv.min_order,
+        n_players=len(indices),
+        baseline_value=baseline_val,
+        estimation_budget=est_budget,
+        estimated=is_estimated,
     )
 
 
@@ -670,6 +718,7 @@ def explain_pipeline(
     target_type: str,
     classes: List[Any] = None,
     cat_ind: List[Any] = None,
+    x_names_sequence: List[Any] = None,
 ) -> Dict[Any, Any]:
     """Calculate feature contribution explanations using Permutation SHAP."""
 
@@ -680,9 +729,15 @@ def explain_pipeline(
     else:
         pred_fun = estimator
 
+    n_features = estimator[0].transform(x_tst).shape[1]
+
+    if pipe_name in ["linear", "gb"]:
+        budget = min(2**n_features, 10 * n_features + math.comb(n_features, 2))
+    elif pipe_name == "tabicl":
+        budget = min(2**n_features, 100 * n_features + math.comb(n_features, 2))
+
     explanations = {}
     for c_class in classes:
-
         if pipe_name in ["linear", "gb"]:
             explainer = TabularExplainer(
                 model=pred_fun,
@@ -695,14 +750,10 @@ def explain_pipeline(
                 random_state=None,
                 verbose=False,
             )
-            n_features = estimator[0].transform(x_tst).shape[1]
             explanations[c_class] = explainer.explain_X(
                 x_tst,
                 n_jobs=-2,
-                budget=min(
-                    2**n_features,
-                    10 * n_features + math.comb(n_features, 2),
-                ),
+                budget=budget,
             )
         elif pipe_name == "tabicl":
             explainer = get_shapiq_explainer(
@@ -713,34 +764,34 @@ def explain_pipeline(
                 max_order=2,
                 class_index=c_class,
             )
-            n_features = estimator[0].transform(x_tst).shape[1]
             explanations[c_class] = explainer.explain_X(
                 estimator[0].transform(x_tst),
                 n_jobs=1,
-                budget=min(
-                    2**n_features,
-                    10 * n_features + math.comb(n_features, 2),
-                ),
+                budget=budget,
             )
 
-    if target_type == "multiclass" and pipe_name in ["gb", "tabicl"]:
+    if target_type == "multiclass" and pipe_name == "tabicl":
         n_cat = len(cat_ind)
         n_features_orig = x_trn.shape[1]
-        for num, _ in enumerate(cat_ind):
-            new_ind = n_features_orig - (n_cat - num)
-            start_ind = n_features - ((n_cat - num) * len(classes))
-            end_ind = start_ind + len(classes)
-            group_ind = list(range(start_ind, end_ind))
-            explanations_new = {}
-            for key in explanations.keys():
-                iv_list = []
-                for iv in explanations[key]:
-                    iv_list.append(
-                        group_features(
-                            iv=iv, features_to_group=group_ind, new_feature_id=new_ind
-                        )
-                    )
-                explanations[key] = iv_list
+        for class_key in explanations.keys():
+            iv_list = []
+            for iv in explanations[class_key]:
+                for num, _ in enumerate(cat_ind):
+                    start_ind = n_features - ((n_cat - num) * len(classes))
+                    end_ind = start_ind + len(classes)
+                    group_ind = list(range(start_ind, end_ind))
+                    new_ind = n_features_orig - (n_cat - num)
+                    iv=group_features(iv=iv, features_to_group=group_ind, new_feature_id=new_ind)
+                iv_list.append(iv)
+            explanations[class_key] = iv_list
+
+    if pipe_name == "tabicl":
+        for class_key in explanations.keys():
+            iv_list = []
+            for iv in explanations[class_key]:
+                iv_list.append(reorder_interaction_values(iv, x_names_sequence))
+            explanations[class_key] = iv_list
+
     return explanations
 
 
@@ -863,7 +914,6 @@ def main() -> None:
                     x_tst_sample = downsample_if_needed(
                         arr=x_tst, target_size=100, label="x_tst"
                     )
-
                     total_x_tst_sample_shapiq.append(x_tst_sample)
 
                     # Primary Hyperparameter Search Fit Phase
@@ -907,6 +957,9 @@ def main() -> None:
                             target_type=target_type,
                             classes=classes,
                             cat_ind=config["X_MULTICAT_IND"],
+                            x_names_sequence=config["X_CONTINUOUS_IND"]
+                            + config["X_BINARY_IND"]
+                            + config["X_MULTICAT_IND"],
                         )
                         tracking[suffix][1].append(shap_data)
 
