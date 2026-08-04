@@ -211,51 +211,6 @@ def predict_logits(self, X: np.ndarray) -> np.ndarray:
 TabICLClassifier.predict_logits = predict_logits
 
 
-def predict_proba(self, X: np.ndarray) -> np.ndarray:
-    """Predict class probabilities for test samples.
-
-    Uses predict_logits to get class logits and returns the class probabilities
-    for each sample.
-
-    Parameters
-    ----------
-    X : array-like of shape (n_samples, n_features)
-        Test samples for prediction.  Columns that are entirely NaN are
-        treated as masked features and excluded from inference.  This is
-        useful for computing SHAP values, where masked features are
-        represented as all-NaN columns.
-
-    Returns
-    -------
-    np.ndarray of shape (n_samples, n_classes)
-        Class probabilities for each test sample.
-    """
-    avg = self.predict_logits(X)
-
-    # Convert logits to probabilities
-    if self.average_logits:
-        avg = self.softmax(avg, axis=-1, temperature=self.softmax_temperature)
-
-    # Normalize probabilities
-    return avg / avg.sum(axis=1, keepdims=True)
-
-
-TabICLClassifier.predict_proba = predict_proba
-
-
-class LGBMLogOddsClassifier(LGBMClassifier):
-    """
-    A drop-in LGBMClassifier that outputs raw log-odds in predict_proba,
-    fully compatible with scikit-learn search CV and shapiq.
-    """
-
-    def predict_proba(self, X, *args, **kwargs):
-        # Clear out any internal 'raw_score' flags passed by predict()
-        kwargs.pop("raw_score", None)
-        # Get raw margin scores using the base model's predict method
-        return super().predict_proba(X, raw_score=True, *args, **kwargs)
-
-
 def setup_logging() -> None:
     """Configure simultaneous logging to both a project file and the terminal."""
     # Basic logging
@@ -518,7 +473,7 @@ def get_gb_estimator_pipeline(
         }
         scorer = "r2"
     elif target_type in ("binary", "multiclass"):
-        predictor = LGBMLogOddsClassifier(
+        predictor = LGBMClassifier(
             objective="multiclass",
             class_weight="balanced",
             **lgbm_params,
@@ -731,11 +686,6 @@ def explain_pipeline(
 
     n_features = estimator[0].transform(x_tst).shape[1]
 
-    if pipe_name in ["linear", "gb"]:
-        budget = min(2**n_features, 10 * n_features + math.comb(n_features, 2))
-    elif pipe_name == "tabicl":
-        budget = min(2**n_features, 100 * n_features + math.comb(n_features, 2))
-
     explanations = {}
     for c_class in classes:
         if pipe_name in ["linear", "gb"]:
@@ -753,7 +703,7 @@ def explain_pipeline(
             explanations[c_class] = explainer.explain_X(
                 x_tst,
                 n_jobs=-2,
-                budget=budget,
+                budget=min(2**n_features, 10 * n_features + math.comb(n_features, 2)),
             )
         elif pipe_name == "tabicl":
             explainer = get_shapiq_explainer(
@@ -767,7 +717,7 @@ def explain_pipeline(
             explanations[c_class] = explainer.explain_X(
                 estimator[0].transform(x_tst),
                 n_jobs=1,
-                budget=budget,
+                budget=min(2**n_features, 10 * n_features + math.comb(n_features, 2)),
             )
 
     if target_type == "multiclass" and pipe_name == "tabicl":
