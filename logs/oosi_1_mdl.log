@@ -1,0 +1,14 @@
+2026-08-10 16:08:55,969 - INFO - Logging established
+2026-08-10 16:08:55,970 - INFO - Logs save at: ../logs/oosi_1_mdl.log
+2026-08-10 16:08:56,012 - INFO - OS: Windows 11
+2026-08-10 16:08:56,013 - INFO - Python Version: 3.13.13
+2026-08-10 16:08:56,013 - INFO - Dependencies save at: ../logs/requirements_oosi_1_mdl.txt
+2026-08-10 16:08:56,014 - INFO - Config names loaded: fear
+2026-08-10 16:08:56,014 - INFO - Config file name to load: ../configs/oosi_configs_fear.yaml
+2026-08-10 16:08:57,199 - INFO - Config and data loaded: ../configs/oosi_configs_fear.yaml
+2026-08-10 16:08:57,199 - INFO - Out-of-Sample-Inference started: fear__fear
+2026-08-10 16:08:57,201 - INFO - Data sliced for fear.
+2026-08-10 16:08:57,201 - INFO - Target type: continuous | Classes: [None] | Total Classes: None
+2026-08-10 16:08:57,202 - INFO - Out-of-Sample-Inference estimator: linear
+2026-08-10 16:08:57,218 - INFO - Fold 1: fear fear linear...
+2026-08-10 16:08:57,219 - INFO - x_trn downsampled to 1000 samples for shapiq

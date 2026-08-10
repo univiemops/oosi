@@ -1,15 +1,11 @@
 # -*- coding: utf-8 -*-
 """Out-of-sample inference 1 - Modeling
-v007
-
-This Python script is an automated Machine Learning pipeline designed for
-robust out-of-sample inference. It dynamically loads data and configurations to train,
-tune, evaluate, and explain predictive models across different data types (continuous,
-binary, or multiclass).
+v010
 
 @author: david.steyrl@univie.ac.at
 """
 
+import gc
 import importlib.metadata as im
 import logging
 import math
@@ -43,7 +39,7 @@ from tabicl import TabICLClassifier, TabICLRegressor
 from tabicl._sklearn.sklearn_utils import validate_data
 from tabicl.shap import get_shapiq_explainer
 
-from custom_splitter import RepeatedGroupKFold
+from custom_splitter import RepeatedGroupKFold, ExtendedGroupShuffleSplit
 
 # Suppress warnings that clog stdout/stderr during rapid solver iterations
 WARNING_MSGS = [
@@ -55,165 +51,23 @@ WARNING_MSGS = [
     "The sample size is larger than the number",
 ]
 
-# For subprocesses (os.environ)
 env_rules = [f"ignore:{msg}" for msg in WARNING_MSGS]
 os.environ["PYTHONWARNINGS"] = ",".join(env_rules)
 
-# For current main process
 for msg in WARNING_MSGS:
     warnings.filterwarnings("ignore", message=f".*{msg}.*")
 
 
-# Monkey patching TabICLClassifier for predict_logits
-def predict_logits(self, X: np.ndarray) -> np.ndarray:
-    """Predict aggregated class logits for test samples.
+def setup_logging() -> None:
+    """Set up the logging environment.
 
-    Applies the ensemble of TabICL models to make predictions, with each ensemble
-    member providing predictions that are then averaged. The method:
-
-    1. Transforms input data using the fitted encoders
-    2. Applies the ensemble generator to create multiple views
-    3. Forwards each view through the model
-    4. Corrects for class shuffles
-    5. Averages predictions across ensemble members
-
-    Parameters
-    ----------
-    X : array-like of shape (n_samples, n_features)
-        Test samples for prediction.  Columns that are entirely NaN are
-        treated as masked features and excluded from inference.  This is
-        useful for computing SHAP values, where masked features are
-        represented as all-NaN columns.
+    Creates the target directory if it does not exist and configures both file
+    and console handlers to log messages at the INFO level.
 
     Returns
     -------
-    np.ndarray of shape (n_samples, n_classes)
-        Class logits for each test sample.
+    None
     """
-    check_is_fitted(self)
-    if isinstance(X, np.ndarray) and len(X.shape) == 1:
-        # Reject 1D arrays to maintain sklearn compatibility
-        raise ValueError("The provided input X is one-dimensional. Reshape your data.")
-
-    # Check if prediction is possible
-    has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
-    has_training_data = (
-        hasattr(self, "ensemble_generator_")
-        and getattr(self.ensemble_generator_, "X_", None) is not None
-    )
-    if not has_kv_cache and not has_training_data:
-        raise RuntimeError(
-            "Cannot predict: this estimator was saved without training data and has no KV cache. "
-            "Predictions require either cached KV projections or the original training data. "
-            "Re-fit the estimator or load from a file saved with save_training_data=True or "
-            "save_kv_cache=True."
-        )
-
-    if self.n_jobs is not None:
-        assert self.n_jobs != 0
-        old_n_threads = torch.get_num_threads()
-        n_logical_cores = mp.cpu_count()
-
-        if self.n_jobs > 0:
-            if self.n_jobs > n_logical_cores:
-                warnings.warn(
-                    f"TabICL got n_jobs={self.n_jobs} but there are only {n_logical_cores} logical cores available."
-                    f" Only {n_logical_cores} threads will be used."
-                )
-            n_threads = max(n_logical_cores, self.n_jobs)
-        else:
-            n_threads = max(1, mp.cpu_count() + 1 + self.n_jobs)
-
-        torch.set_num_threads(n_threads)
-
-    # Preserve DataFrame structure to retain column names and types for correct feature transformation
-    X = validate_data(self, X, reset=False, dtype=None, skip_check_array=True)
-
-    # Detect all-NaN columns (used by SHAP's feature masking approach)
-    if hasattr(X, "columns"):  # check for dataframe without importing pandas
-        feature_mask = X.isna().all(axis=0).to_numpy()
-    else:
-        arr = np.asarray(X)
-        if np.issubdtype(arr.dtype, np.number):
-            feature_mask = np.isnan(arr).all(axis=0)
-        else:
-            # object dtype: v != v is True only for NaN in IEEE 754, safe for strings too
-            feature_mask = np.array(
-                [all(v != v for v in arr[:, i]) for i in range(arr.shape[1])]
-            )
-
-    if feature_mask is not None and not np.any(feature_mask):
-        feature_mask = None
-
-    # Fill masked columns so that transformers don't choke on NaN
-    if feature_mask is not None:
-        if hasattr(X, "columns"):  # Proxy way to check whether X is a dataframe
-            X.iloc[:, feature_mask] = 0.0
-        else:
-            X[:, feature_mask] = 0.0
-
-    X = self.X_encoder_.transform(X)
-
-    # Skip KV cache when features are masked
-    has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
-    use_cache = has_kv_cache and feature_mask is None
-
-    if use_cache:
-        # Cache exists: forward only test data and use the pre-computed cache for training data
-        test_data = self.ensemble_generator_.transform(X, mode="test")
-        outputs = []
-        for norm_method, (Xs_test,) in test_data.items():
-            kv_cache = self.model_kv_cache_[norm_method]
-            outputs.append(self._batch_forward_with_cache(Xs_test, kv_cache))
-        outputs = np.concatenate(outputs, axis=0)
-    else:
-        # No cache or masked features: forward both training and test data
-        data = self.ensemble_generator_.transform(
-            X, mode="both", feature_mask=feature_mask
-        )
-        outputs = []
-        for norm_method, (Xs, ys) in data.items():
-            if feature_mask is None:
-                feature_shuffles = self.ensemble_generator_.feature_shuffles_[
-                    norm_method
-                ]
-            else:
-                feature_shuffles = self.ensemble_generator_.masked_feature_shuffles_[
-                    norm_method
-                ]
-
-            outputs.append(self._batch_forward(Xs, ys, feature_shuffles))
-        outputs = np.concatenate(outputs, axis=0)
-
-    # Extract class shuffle patterns from ensemble generator
-    class_shuffles = []
-    for shuffles in self.ensemble_generator_.class_shuffles_.values():
-        class_shuffles.extend(shuffles)
-
-    # Determine actual number of ensemble members
-    n_estimators = len(class_shuffles)
-
-    # Aggregate predictions from all ensemble members, correcting for class shuffles
-    avg = np.zeros_like(outputs[0])
-    for i, loop_shuffle in enumerate(class_shuffles):
-        out = outputs[i]
-        avg += out[..., loop_shuffle]
-
-    # Calculate ensemble average
-    avg /= n_estimators
-
-    if self.n_jobs is not None:
-        torch.set_num_threads(old_n_threads)
-
-    return avg
-
-
-TabICLClassifier.predict_logits = predict_logits
-
-
-def setup_logging() -> None:
-    """Configure simultaneous logging to both a project file and the terminal."""
-    # Basic logging
     log_dir = "../logs"
     os.makedirs(log_dir, exist_ok=True)
     log_file = f"{log_dir}/oosi_1_mdl.log"
@@ -225,7 +79,6 @@ def setup_logging() -> None:
         force=True,
     )
 
-    # Add console logger
     console_handler = logging.StreamHandler()
     console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     console_handler.setFormatter(console_formatter)
@@ -237,7 +90,15 @@ def setup_logging() -> None:
 
 
 def document_requirements() -> None:
-    """Document environmental dependencies, logging system configuration and Python specs."""
+    """Document system environment details and installed Python packages.
+
+    Writes a list of installed packages and their versions to a text file
+    and logs the current operating system and Python version.
+
+    Returns
+    -------
+    None
+    """
     lines = [f"{dist.name}=={dist.version}" for dist in im.distributions()]
     req_file = "../logs/requirements_oosi_1_mdl.txt"
 
@@ -250,7 +111,18 @@ def document_requirements() -> None:
 
 
 def get_configs_names(file_path: str) -> List[str]:
-    """Load configurations names list from a specified YAML file."""
+    """Load configuration names from a YAML file.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the YAML file containing the 'CONFIGS_NAMES' key.
+
+    Returns
+    -------
+    configs_names : list of str
+        List of configuration names retrieved from the file.
+    """
     with open(file_path, "r", encoding="utf-8") as file:
         configs_names = yaml.safe_load(file)["CONFIGS_NAMES"]
 
@@ -259,7 +131,18 @@ def get_configs_names(file_path: str) -> List[str]:
 
 
 def get_configs_file_names(configs_names: List[str]) -> List[str]:
-    """Convert configuration names into their respective YAML file paths."""
+    """Construct file paths for the configuration files based on config names.
+
+    Parameters
+    ----------
+    configs_names : list of str
+        List of configuration identifiers.
+
+    Returns
+    -------
+    config_file_names : list of str
+        List of constructed YAML configuration file paths.
+    """
     config_file_names = [
         f"../configs/oosi_configs_{name}.yaml" for name in configs_names
     ]
@@ -269,7 +152,22 @@ def get_configs_file_names(configs_names: List[str]) -> List[str]:
 
 
 def get_configs(configs_file_names: List[str]) -> List[Dict[str, Any]]:
-    """Load configuration details and load the associated dataset from files."""
+    """Load configuration details and datasets specified in YAML files.
+
+    Reads configuration parameters from each path, loads data from the
+    specified Excel file and sheet, extracts groups (G), features (X),
+    and targets (Y), and attaches them back to the configuration dictionary.
+
+    Parameters
+    ----------
+    configs_file_names : list of str
+        List of file paths to configuration files.
+
+    Returns
+    -------
+    configs : list of dict of {str: typing.Any}
+        List of loaded configuration dictionaries updated with DataFrame objects.
+    """
     configs = []
     dtypes = {"G": np.int64, "X": np.float64, "Y": np.float64}
 
@@ -296,7 +194,27 @@ def get_configs(configs_file_names: List[str]) -> List[Dict[str, Any]]:
 def get_data(
     config: Dict[str, Any], y_name: str
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Retrieve features, target, and groups aligned on non-null targets."""
+    """Extract and align feature, target, and group DataFrames for a target variable.
+
+    Drops missing values from the target variable and aligns feature (X) and
+    group (G) DataFrames according to the target's non-NaN index.
+
+    Parameters
+    ----------
+    config : dict of {str: typing.Any}
+        Configuration dictionary containing 'X', 'Y', and 'G' DataFrames.
+    y_name : str
+        Name of the target column to extract.
+
+    Returns
+    -------
+    x_df : pandas.DataFrame of shape (n_samples, n_features)
+        Aligned feature matrix.
+    y_df : pandas.DataFrame of shape (n_samples, 1)
+        Target DataFrame without missing values.
+    g_df : pandas.DataFrame of shape (n_samples, 1)
+        Aligned group structure.
+    """
     y_df = config["Y"][y_name].to_frame().dropna()
     g_df = config["G"].reindex(index=y_df.index)
     x_df = config["X"].reindex(index=y_df.index)
@@ -312,7 +230,23 @@ def get_data(
 def get_preprocessor(
     config: Dict[str, Any], target_type: str, pipe_name: str
 ) -> ColumnTransformer:
-    """Helper to assemble the common ColumnTransformer steps."""
+    """Create a ColumnTransformer preprocessor for continuous, binary, and categorical features.
+
+    Parameters
+    ----------
+    config : dict of {str: typing.Any}
+        Configuration dictionary containing column index lists ('X_CONTINUOUS_IND',
+        'X_BINARY_IND', 'X_MULTICAT_IND').
+    target_type : {'continuous', 'binary', 'multiclass'}
+        The data type of the target variable, controlling target encoder behavior.
+    pipe_name : {'linear', 'gb', 'tabicl'}
+        Identifier for the modeling pipeline architecture.
+
+    Returns
+    -------
+    preprocessor : sklearn.compose.ColumnTransformer
+        Configured preprocessor applying target-specific transformations.
+    """
     if pipe_name == "linear":
         cont = Pipeline(
             [
@@ -373,10 +307,6 @@ def get_preprocessor(
                 ),
             ]
         )
-    else:
-        raise ValueError(
-            f"Unknown pipe_name: '{pipe_name}' encountered in get_preprocessor."
-        )
 
     return ColumnTransformer(
         [
@@ -387,146 +317,158 @@ def get_preprocessor(
     )
 
 
-def get_linear_estimator_pipeline(
-    config: Dict[str, Any], target_type: str, n_classes: int
+def get_estimator_pipeline(
+    config: Dict[str, Any], target_type: str, n_classes: int, pipe_name: str
 ) -> Tuple[Pipeline, Dict[str, Any], str]:
-    """Construct a pipeline containing multi-type preprocessors and a linear estimator."""
-    preprocessor = get_preprocessor(config, target_type, pipe_name="linear")
+    """Construct estimator pipelines, parameter spaces, and evaluation metrics.
 
-    if target_type == "continuous":
-        regressor = ElasticNet(max_iter=10000, warm_start=True, selection="random")
-        predictor = TransformedTargetRegressor(
-            regressor=regressor, transformer=StandardScaler()
-        )
-        space = {
-            "predictor__regressor__alpha": loguniform(0.01, 100),
-            "predictor__regressor__l1_ratio": uniform(0, 1),
+    Parameters
+    ----------
+    config : dict of {str: typing.Any}
+        Configuration dictionary containing dataset metadata and parameters.
+    target_type : {'continuous', 'binary', 'multiclass'}
+        The target data type indicating regression or classification.
+    n_classes : int or None
+        Number of target classes (for classification models).
+    pipe_name : {'linear', 'gb', 'tabicl'}
+        Type of pipeline to construct.
+
+    Returns
+    -------
+    pipeline : sklearn.pipeline.Pipeline
+        Scikit-learn pipeline comprising preprocessor and estimator.
+    space : dict of {str: typing.Any}
+        Hyperparameter search space dictionary for model tuning.
+    scorer : str
+        Scoring metric name (e.g., 'r2' or 'balanced_accuracy').
+    """
+    preprocessor = get_preprocessor(config, target_type, pipe_name=pipe_name)
+    scorer = "r2" if target_type == "continuous" else "balanced_accuracy"
+
+    if pipe_name == "linear":
+        if target_type == "continuous":
+            regressor = ElasticNet(max_iter=10000, warm_start=True, selection="random")
+            predictor = TransformedTargetRegressor(
+                regressor=regressor, transformer=StandardScaler()
+            )
+            space = {
+                "predictor__regressor__alpha": loguniform(0.01, 100),
+                "predictor__regressor__l1_ratio": uniform(0, 1),
+            }
+        elif target_type in ("binary", "multiclass"):
+            predictor = LogisticRegression(
+                class_weight="balanced", solver="saga", max_iter=10000, warm_start=True
+            )
+            space = {
+                "predictor__C": loguniform(0.01, 100),
+                "predictor__l1_ratio": uniform(0, 1),
+            }
+
+    elif pipe_name == "gb":
+        lgbm_params = {
+            "boosting_type": "gbdt",
+            "num_leaves": 100,
+            "max_depth": -1,
+            "learning_rate": 0.01,
+            "n_estimators": 1000,
+            "subsample_for_bin": 10000,
+            "min_split_gain": 0.0,
+            "min_child_weight": 0.00001,
+            "min_child_samples": 2,
+            "subsample": 1.0,
+            "subsample_freq": 0,
+            "colsample_bytree": 1.0,
+            "reg_alpha": 0.0,
+            "reg_lambda": 0.0,
+            "n_jobs": 1,
+            "importance_type": "gain",
         }
-        scorer = "r2"
-    elif target_type in ("binary", "multiclass"):
-        predictor = LogisticRegression(
-            class_weight="balanced", solver="saga", max_iter=10000, warm_start=True
-        )
-        space = {
-            "predictor__C": loguniform(0.01, 100),
-            "predictor__l1_ratio": uniform(0, 1),
+
+        extra_params = {
+            "bagging_seed": None,
+            "data_random_seed": None,
+            "data_sample_strategy": "bagging",
+            "extra_seed": None,
+            "feature_fraction_seed": None,
+            "feature_pre_filter": False,
+            "force_col_wise": True,
+            "min_data_in_bin": 1,
+            "min_data_in_leaf": 2,
+            "verbosity": -1,
         }
-        scorer = "balanced_accuracy"
-    else:
-        raise ValueError(f"Unknown target_type: '{target_type}' encountered.")
 
-    return (
-        Pipeline([("preprocessor", preprocessor), ("predictor", predictor)]),
-        space,
-        scorer,
-    )
+        if target_type == "continuous":
+            regressor = LGBMRegressor(
+                objective="mean_squared_error", **lgbm_params, **extra_params
+            )
+            predictor = TransformedTargetRegressor(
+                regressor=regressor, transformer=StandardScaler()
+            )
+            space = {
+                "predictor__regressor__colsample_bytree": uniform(0, 1),
+                "predictor__regressor__extra_trees": [True, False],
+                "predictor__regressor__path_smooth": loguniform(0.1, 100),
+            }
+        elif target_type in ("binary", "multiclass"):
+            predictor = LGBMClassifier(
+                objective="multiclass",
+                class_weight="balanced",
+                **lgbm_params,
+                **{**extra_params, "num_class": n_classes},
+            )
+            space = {
+                "predictor__colsample_bytree": uniform(0.1, 0.9),
+                "predictor__extra_trees": [True, False],
+                "predictor__path_smooth": loguniform(0.1, 100),
+            }
 
-
-def get_gb_estimator_pipeline(
-    config: Dict[str, Any], target_type: str, n_classes: int
-) -> Tuple[Pipeline, Dict[str, Any], str]:
-    """Construct a pipeline containing preprocessors and a Gradient Boosting estimator."""
-    preprocessor = get_preprocessor(config, target_type, pipe_name="gb")
-    lgbm_params = {
-        "boosting_type": "gbdt",
-        "num_leaves": 100,
-        "max_depth": -1,
-        "learning_rate": 0.01,
-        "n_estimators": 1000,
-        "subsample_for_bin": 10000,
-        "min_split_gain": 0.0,
-        "min_child_weight": 0.00001,
-        "min_child_samples": 2,
-        "subsample": 1.0,
-        "subsample_freq": 0,
-        "colsample_bytree": 1.0,
-        "reg_alpha": 0.0,
-        "reg_lambda": 0.0,
-        "n_jobs": 1,
-        "importance_type": "gain",
-    }
-
-    extra_params = {
-        "bagging_seed": None,
-        "data_random_seed": None,
-        "data_sample_strategy": "bagging",
-        "extra_seed": None,
-        "feature_fraction_seed": None,
-        "feature_pre_filter": False,
-        "force_col_wise": True,
-        "min_data_in_bin": 1,
-        "min_data_in_leaf": 2,
-        "verbosity": -1,
-    }
-
-    if target_type == "continuous":
-        regressor = LGBMRegressor(
-            objective="mean_squared_error", **lgbm_params, **extra_params
-        )
-        predictor = TransformedTargetRegressor(
-            regressor=regressor, transformer=StandardScaler()
-        )
-        space = {
-            "predictor__regressor__colsample_bytree": uniform(0, 1),
-            "predictor__regressor__extra_trees": [True, False],
-            "predictor__regressor__path_smooth": loguniform(0.1, 100),
-        }
-        scorer = "r2"
-    elif target_type in ("binary", "multiclass"):
-        predictor = LGBMClassifier(
-            objective="multiclass",
-            class_weight="balanced",
-            **lgbm_params,
-            **{**extra_params, "num_class": n_classes},
-        )
-        space = {
-            "predictor__colsample_bytree": uniform(0.1, 0.9),
-            "predictor__extra_trees": [True, False],
-            "predictor__path_smooth": loguniform(0.1, 100),
-        }
-        scorer = "balanced_accuracy"
-    else:
-        raise ValueError(f"Unknown target_type: '{target_type}' encountered.")
-
-    return (
-        Pipeline([("preprocessor", preprocessor), ("predictor", predictor)]),
-        space,
-        scorer,
-    )
-
-
-def get_tabicl_estimator_pipeline(
-    config: Dict[str, Any], target_type: str, n_classes: int
-) -> Tuple[Pipeline, Dict[str, Any], str]:
-    """Construct a pipeline containing preprocessors and a TabICL estimator."""
-    preprocessor = get_preprocessor(config, target_type, pipe_name="tabicl")
-
-    if target_type == "continuous":
-        predictor = TabICLRegressor(
-            n_estimators=10,
-            kv_cache=True,
-            model_path="../models/tabicl-regressor-v2-20260212.ckpt",
-            random_state=None,
-        )
+    elif pipe_name == "tabicl":
         space = {}
-        scorer = "r2"
-    elif target_type in ("binary", "multiclass"):
-        predictor = TabICLClassifier(
-            n_estimators=10,
-            kv_cache=True,
-            model_path="../models/tabicl-classifier-v2-20260212.ckpt",
-            random_state=None,
-        )
-        space = {}
-        scorer = "balanced_accuracy"
-    else:
-        raise ValueError(f"Unknown target_type: '{target_type}' encountered.")
+        if target_type == "continuous":
+            predictor = TabICLRegressor(
+                n_estimators=10,
+                batch_size=None,
+                kv_cache=True,
+                model_path="../models/tabicl-regressor-v2-20260212.ckpt",
+                random_state=None,
+            )
+        elif target_type in ("binary", "multiclass"):
+            predictor = TabICLClassifier(
+                n_estimators=10,
+                batch_size=None,
+                kv_cache=True,
+                model_path="../models/tabicl-classifier-v2-20260212.ckpt",
+                random_state=None,
+            )
 
     return (
         Pipeline([("preprocessor", preprocessor), ("predictor", predictor)]),
         space,
         scorer,
     )
+
+
+def get_splitter(config: Dict[str, Any]):
+    """Instantiate CV splitter dynamically based on YAML configurations.
+
+    Parameters
+    ----------
+    config : dict of {str: typing.Any}
+        Configuration dictionary containing 'SPLITTER' and 'SPLITTER_PARAMS'.
+
+    Returns
+    -------
+    splitter : object
+        Cross-validation splitter instance (e.g., RepeatedGroupKFold or
+        ExtendedGroupShuffleSplit).
+    """
+    splitter_name = config["SPLITTER"]
+    params = config["SPLITTER_PARAMS"]
+
+    if splitter_name == "RepeatedGroupKFold":
+        return RepeatedGroupKFold(**params)
+    elif splitter_name == "ExtendedGroupShuffleSplit":
+        return ExtendedGroupShuffleSplit(**params)
 
 
 def get_estimator_scores(
@@ -536,7 +478,27 @@ def get_estimator_scores(
     target_type: str,
     sample_indices: np.ndarray,
 ) -> Dict[str, Any]:
-    """Evaluate performance of the estimator pipeline on holdout test data."""
+    """Evaluate fitted estimator performance on test dataset and compile metrics.
+
+    Parameters
+    ----------
+    estimator : sklearn.pipeline.Pipeline
+        Fitted pipeline estimator used to generate predictions.
+    x_tst : numpy.ndarray of shape (n_samples, n_features)
+        Test feature data matrix.
+    y_tst : numpy.ndarray of shape (n_samples,)
+        True target labels or continuous targets.
+    target_type : {'continuous', 'binary', 'multiclass'}
+        Target classification type used to compute relevant scoring metrics.
+    sample_indices : numpy.ndarray of shape (n_samples,)
+        Indices of test samples used within the split.
+
+    Returns
+    -------
+    scores : dict of {str: typing.Any}
+        Dictionary containing sample indices, actual targets, predictions,
+        and performance metrics (MAE, R2, accuracy).
+    """
     y_pred = estimator.predict(x_tst)
 
     return {
@@ -559,17 +521,21 @@ def get_estimator_scores(
 def group_features(
     iv: InteractionValues, features_to_group: list[int] or set[int], new_feature_id: int
 ) -> InteractionValues:
-    """
-    Groups a specified subset of features into a single unified feature
-    for an InteractionValues object, supporting arbitrary interaction orders (k-SII).
+    """Group subset indices within a SHAP interaction values object into a unified index.
 
-    Args:
-        iv: The original shapiq InteractionValues object.
-        features_to_group: Iterable of feature indices (ints) to group together.
-        new_feature_id: The new integer index to assign to the grouped feature.
+    Parameters
+    ----------
+    iv : shapiq.interaction_values.InteractionValues
+        Original InteractionValues instance.
+    features_to_group : list of int or set of int
+        Indices of features to combine into a single index entity.
+    new_feature_id : int
+        New integer index assigned to the grouped feature set.
 
-    Returns:
-        A new InteractionValues object with grouped values across all orders.
+    Returns
+    -------
+    grouped_iv : shapiq.interaction_values.InteractionValues
+        New InteractionValues object with aggregated interaction features.
     """
     group = set(features_to_group)
     new_values = {}
@@ -578,26 +544,19 @@ def group_features(
         subset_set = set(subset)
         intersection = subset_set.intersection(group)
 
-        # Case A: The subset has no elements inside the grouped features
         if len(intersection) == 0:
             new_values[subset] = new_values.get(subset, 0.0) + value
-        # Case B: The subset contains elements of the group (any order)
         else:
-            # Remove grouped features and replace them with the single macro-player
             outside_elements = subset_set.difference(group)
             new_subset = tuple(sorted(list(outside_elements) + [new_feature_id]))
             new_values[new_subset] = new_values.get(new_subset, 0.0) + value
 
-    # Grab the baseline value from the original object
     baseline_val = iv.baseline_value
-
-    # Use n_players instead of n_features
     new_n_players = iv.n_players - len(group) + 1
+    new_min_order = (
+        min(len(k) for k in new_values.keys()) if new_values else iv.min_order
+    )
 
-    # Determine the new minimum order dynamically based on the resulting dictionary keys
-    new_min_order = min(len(k) for k in new_values.keys()) if new_values else iv.min_order
-
-    # Return the freshly minted shapiq object
     return InteractionValues(
         values=new_values,
         index=iv.index,
@@ -612,25 +571,30 @@ def group_features(
 def reorder_interaction_values(
     iv: InteractionValues, indices: List[int]
 ) -> InteractionValues:
-    """
-    Resorts the players in an InteractionValues object to fit their original positions.
+    """Remap target indices within an InteractionValues instance according to a sequence map.
 
-    This maps the current player indices (0, 1, ..., n-1) to their original sequence positions
-    specified in `indices` (where player i is mapped to indices[i]), sorting each subset 
-    to preserve canonical shapiq ordering.
+    Parameters
+    ----------
+    iv : shapiq.interaction_values.InteractionValues
+        Original interaction values structure to reorder.
+    indices : list of int
+        Mapping list where index positions define new player indices.
 
-    Args:
-        iv: The original shapiq InteractionValues object.
-        indices: A list of integers giving the original positions for the current players.
-                 e.g. [1, 3, 0, 2, 4, 5, 6]
+    Returns
+    -------
+    reordered_iv : shapiq.interaction_values.InteractionValues
+        InteractionValues instance with remapped player feature indices.
 
-    Returns:
-        A new InteractionValues object with rearranged and sorted players.
+    Raises
+    ------
+    ValueError
+        If length of provided indices list is smaller than total number of players.
+    IndexError
+        If an index present inside interaction subset is out of bounds for target mapping.
     """
     new_values = {}
     n_players_current = iv.n_players
 
-    # Validation check
     if len(indices) < n_players_current:
         raise ValueError(
             f"The length of the indices list ({len(indices)}) must be at least "
@@ -638,8 +602,6 @@ def reorder_interaction_values(
         )
 
     for subset, value in iv.dict_values.items():
-        # Map each player index in the subset to its original index in the list
-        # Sorted to ensure standard canonical subset order required by shapiq
         try:
             new_subset = tuple(sorted(indices[p] for p in subset))
         except IndexError as e:
@@ -648,7 +610,6 @@ def reorder_interaction_values(
             ) from e
         new_values[new_subset] = value
 
-    # Retrieve other metadata with safe fallbacks
     baseline_val = getattr(iv, "baseline_value", 0.0)
     est_budget = getattr(iv, "estimation_budget", None)
     is_estimated = getattr(iv, "estimated", False)
@@ -675,8 +636,32 @@ def explain_pipeline(
     cat_ind: List[Any] = None,
     x_names_sequence: List[Any] = None,
 ) -> Dict[Any, Any]:
-    """Calculate feature contribution explanations using Permutation SHAP."""
+    """Compute feature interaction explanations using SHAPIQ for model evaluation pipelines.
 
+    Parameters
+    ----------
+    estimator : sklearn.pipeline.Pipeline
+        Fitted model pipeline to explain.
+    x_trn : numpy.ndarray of shape (n_samples_train, n_features)
+        Training dataset sample used for background baseline.
+    x_tst : numpy.ndarray of shape (n_samples_test, n_features)
+        Test dataset sample to explain.
+    pipe_name : {'linear', 'gb', 'tabicl'}
+        Identifier string of the model architecture.
+    target_type : {'continuous', 'binary', 'multiclass'}
+        Data type of the target variable.
+    classes : list of Any, default=None
+        List of target class indices to calculate explanations for.
+    cat_ind : list of Any, default=None
+        Indices of categorical features requiring re-grouping post-transformation.
+    x_names_sequence : list of Any, default=None
+        Full feature index sequence used for ordering interaction values.
+
+    Returns
+    -------
+    explanations : dict of {Any: list of shapiq.interaction_values.InteractionValues}
+        Mapping of target class indices to lists of InteractionValues for each instance.
+    """
     if pipe_name == "linear" and target_type in ["binary", "multiclass"]:
         pred_fun = estimator.decision_function
     elif pipe_name == "gb" and target_type in ["binary", "multiclass"]:
@@ -731,7 +716,9 @@ def explain_pipeline(
                     end_ind = start_ind + len(classes)
                     group_ind = list(range(start_ind, end_ind))
                     new_ind = n_features_orig - (n_cat - num)
-                    iv=group_features(iv=iv, features_to_group=group_ind, new_feature_id=new_ind)
+                    iv = group_features(
+                        iv=iv, features_to_group=group_ind, new_feature_id=new_ind
+                    )
                 iv_list.append(iv)
             explanations[class_key] = iv_list
 
@@ -746,7 +733,19 @@ def explain_pipeline(
 
 
 def log_metrics(scores_list: List[Dict[str, Any]], prefix: str = "") -> None:
-    """Helper layout for clean and centralized metrics evaluation output logs."""
+    """Calculate and log aggregate performance metrics from evaluation scores.
+
+    Parameters
+    ----------
+    scores_list : list of dict of {str: typing.Any}
+        List of target prediction score dictionaries generated by `get_estimator_scores`.
+    prefix : str, default=""
+        Prefix label string used in formatted log output messages.
+
+    Returns
+    -------
+    None
+    """
     label = f"Avg {prefix}".strip()
 
     if scores_list[0]["target_type"] == "continuous":
@@ -763,9 +762,22 @@ def log_metrics(scores_list: List[Dict[str, Any]], prefix: str = "") -> None:
 
 
 def downsample_if_needed(arr: np.ndarray, target_size: int, label: str) -> np.ndarray:
-    """Drops rows containing NaNs, then applies scikit-learn random structural data subsetting allocations."""
-    # Downsample if the remaining clean rows still exceed target_size
+    """Downsample data array without replacement if its length exceeds target size.
 
+    Parameters
+    ----------
+    arr : numpy.ndarray of shape (n_samples, ...)
+        Input data array to downsample.
+    target_size : int
+        Maximum permitted number of rows/samples.
+    label : str
+        Description of input dataset for logging purposes.
+
+    Returns
+    -------
+    downsampled_arr : numpy.ndarray of shape (n_samples_sampled, ...)
+        Original data array or downsampled sample array.
+    """
     if arr.shape[0] > target_size:
         logging.info(f"{label} downsampled to {target_size} samples for shapiq")
         return resample(arr, replace=False, n_samples=target_size)
@@ -774,16 +786,16 @@ def downsample_if_needed(arr: np.ndarray, target_size: int, label: str) -> np.nd
 
 
 def main() -> None:
-    """Coordinate configuration loads, orchestrate loops, and save results."""
+    """Execute the core out-of-sample inference model pipeline and logging routine.
+
+    Returns
+    -------
+    None
+    """
     setup_logging()
     document_requirements()
     configs_names = get_configs_names("../configs/oosi_configs_names.yaml")
     configs = get_configs(get_configs_file_names(configs_names))
-    pipeline_mapping = {
-        "linear": get_linear_estimator_pipeline,
-        "gb": get_gb_estimator_pipeline,
-        "tabicl": get_tabicl_estimator_pipeline,
-    }
 
     for config in configs:
         for target_idx, y_name in enumerate(config["Y_NAMES"]):
@@ -791,7 +803,6 @@ def main() -> None:
             logging.info(f"Out-of-Sample-Inference started: {analysis_name}")
             x_df, y_df, g_df = get_data(config, y_name)
 
-            # Map target metadata parameters seamlessly
             if target_idx in config["Y_CONTINUOUS_IND"]:
                 target_type, classes, n_classes = "continuous", [None], None
             else:
@@ -807,11 +818,6 @@ def main() -> None:
             n_features = len(config["X_NAMES"])
 
             for pipe_name in config["PIPELINE_CONFIGS"]:
-                if pipe_name not in pipeline_mapping:
-                    raise ValueError(
-                        f"Pipeline name {pipe_name} was not in linear/gb/tabicl."
-                    )
-
                 logging.info(f"Out-of-Sample-Inference estimator: {pipe_name}")
                 save_path = f"../results/{analysis_name}/{pipe_name}"
                 os.makedirs(save_path, exist_ok=True)
@@ -830,19 +836,14 @@ def main() -> None:
                         f,
                     )
 
-                raw_estimator, search_space, scorer = pipeline_mapping[pipe_name](
-                    config, target_type, n_classes
-                )
-
-                # Results infrastructure tracking metrics
                 tracking = {
                     "": ([], []),
                     "_sh": ([], []),
-                }  # Tuple footprint layout mapping (Scores, Shap)
+                }
                 total_best_params = []
                 total_x_tst_sample_shapiq = []
 
-                cv = RepeatedGroupKFold(n_splits=5, n_repeats=6, random_state=3141592)
+                cv = get_splitter(config)
 
                 for fold_idx, (train_idx, test_idx) in enumerate(
                     cv.split(x_df, y=y_df, groups=g_df)
@@ -866,7 +867,10 @@ def main() -> None:
                     )
                     total_x_tst_sample_shapiq.append(x_tst_sample)
 
-                    # Primary Hyperparameter Search Fit Phase
+                    raw_estimator, search_space, scorer = get_estimator_pipeline(
+                        config, target_type, n_classes, pipe_name
+                    )
+
                     if pipe_name in ["linear", "gb"]:
                         search = RandomizedSearchCV(
                             estimator=raw_estimator,
@@ -883,7 +887,6 @@ def main() -> None:
                     else:
                         estimator = raw_estimator.fit(X=x_trn, y=y_trn)
 
-                    # Control Blueprint Shuffled Target setup paired inside structural loop
                     models_to_evaluate = {
                         "": (estimator, ""),
                         "_sh": (
@@ -913,7 +916,6 @@ def main() -> None:
                         )
                         tracking[suffix][1].append(shap_data)
 
-                    # Save intermediate unified metrics arrays safely
                     files_to_save = {
                         "total_best_params.pkl": total_best_params,
                         "total_scores.pkl": tracking[""][0],
@@ -932,6 +934,13 @@ def main() -> None:
                     logging.info(
                         f"Results saved. Fold run time: {time.time() - start_time:.2f}s"
                     )
+
+                    del raw_estimator
+                    del estimator
+                    del models_to_evaluate
+                    del mdl
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
     logging.info("Out-of-Sample-Inference finished.")
 

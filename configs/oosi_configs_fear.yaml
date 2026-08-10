@@ -1,0 +1,79 @@
+# Specifiy analysis name
+# Valid options: name to identify .yaml config data files
+ANALYSIS_NAME: fear
+
+# Specify path to data
+# Valid options: path to and name of .xlsx data file
+PATH_TO_DATA: ../sample_data/fear_20260709.xlsx
+
+# Specify sheet name
+# Valid options: sheet name in .xlsx file 
+SHEET_NAME: training
+
+# Specify grouping for CV split
+# Valid options: column name in sheet of .xlsx
+G_NAME: [participant_id]
+
+# Specify predictor name(s)
+# Valid options: column name(s) in sheet of .xlsx
+X_NAMES: [
+    stim_id,
+    gender,
+    age,
+    FSQ_1_sum,
+    SPQ_sum,
+    SAS_sum,
+    STAI_state_sum,
+    STAI_trait_sum,
+    FEE_sum,
+    SEE_sum,
+]
+
+# Specify indices for X_NAMES that indicate continuous numeric variables
+# Valid options: list of integer starting with 0 or empty list
+X_CONTINUOUS_IND: [2, 3, 4, 5, 6, 7, 8, 9]
+
+# Specify indices for X_NAMES that indicate binary discrete variables
+# Valid options: list of integer starting with 0 or empty list
+X_BINARY_IND: [1]
+
+# Specify indices for X_NAMES that indicate multi categorical variables (TARGET ENCODING or ONE HOT ENCODING)
+# Valid options: list of integer starting with 0 or empty list
+X_MULTICAT_IND: [0]
+
+# Specify target name(s)
+# Valid options: column name(s) in sheet of .xlsx
+Y_NAMES: [fear]
+
+# Specify indices for Y_NAMES that indicate continuous numeric variables (REGRESSION)
+# Valid options: list of integer starting with 0 or empty list
+Y_CONTINUOUS_IND: [0]
+
+# Specify indices for Y_NAMES that indicate binary variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_BINARY_IND: []
+
+# Specify indices for Y_NAMES that indicate multiclass categorical variables (CLASSIFICATION)
+# Valid options: list of integer starting with 0 or empty list
+Y_MULTICLASS_IND: []
+
+# Specify data splitting scheme
+# Valid options: str of "RepeatedGroupKFold" or "ExtendedGroupShuffleSplit"
+SPLITTER: ExtendedGroupShuffleSplit
+
+# Parameters passed directly to the splitter class instantiation
+SPLITTER_PARAMS:
+    n_splits: 99
+    n_test_groups: 1
+    replace: False
+    train_groups: 
+    max_test_samples_per_group: 45
+    n_inject_per_group: 20
+    inject_strategy: random
+    inject_group_col: 0
+    exhaustive_threshold: 10000
+    random_state: 3141592
+
+# Define the list of active pipeline configurations to execute sequentially.
+# Each entry contains a label name and its respective pipeline instantiator function.
+PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]
