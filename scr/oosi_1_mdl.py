@@ -856,6 +856,7 @@ def main() -> None:
                     g_trn = g_df.iloc[train_idx].to_numpy().squeeze()
                     x_trn = x_df.iloc[train_idx].to_numpy().squeeze()
                     y_trn = y_df.iloc[train_idx].to_numpy().squeeze()
+                    g_tst = g_df.iloc[test_idx].to_numpy().squeeze()
                     x_tst = x_df.iloc[test_idx].to_numpy().squeeze()
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 

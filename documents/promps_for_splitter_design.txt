@@ -1,0 +1,16 @@
+Add extended custom splitter class named ExtendedGroupShuffleSplit to the custom_splitter.py:
+At its core, it provides randomized train/test splits based on groups like group shuffle split from scikit learn but extends its functionality by sampling the test set with or without replacement, hence, not allowing repetitions of test set group combinations until all possibilities are exhausted.
+Sampling without replacement is implemented by two different mechanisms depending on the amount of test set group combinations. For low numbers, an exhaustive approach is used. For a high number of potential test set groups combination, a sample and reject approach is used.
+Include a scikit learn doc string including usage examples.
+
+Extend the ExtendedGroupShuffleSplit class by the following functionality:
+Predefined training groups. Samples of these groups constitutes the training set. This training set is not extended by remaining groups. These groups are never used for the testing set. The core functionality of the splitter is carried out on the remaining groups (sampling with or without replacement) only. If no predefined training groups are passed the old functionality is used. 
+Include a scikit learn doc string including usage examples.
+
+Extend the ExtendedGroupShuffleSplit class by the following functionality:
+Limiting the number of testing samples per group in the testing set. Hence, after finding the testing groups, only a number of randomly drawn test samples per group is actually used for the test set. The remaining testing samples are not used in testing or in traning sets. Example: if this is set to 45, 45 samples per group are randomly drawn from the samples in the preliminary test set. The preliminary test set includes all samples as defined with the test set groups. Add a None option to allow all samples in the testing set and bypassing the limit samples functionality.
+Include a scikit learn doc string including usage examples.
+
+Extend the ExtendedGroupShuffleSplit class by the following functionality:
+It must be possible to inject back a specified number of unused test samples into the train set. Hence, from the functionality so far a certain number of testing samples are not used. From these samples a certain number must be selected and injected back in the training set, this must work also in the case of a fixed training set, hence, when train_groups is set. Specifically, this means that the training set is extended in this case by the injected samples per group. The selection of samples to be injected back must work according to the following two mechanisms. 1. Random selection: randomly select a specified number of samples per group and inject them back. Hence, 5 means to randomly select 5 samples per group and inject them back. 2. selection based on average target value. The average is computed per group of a grouping variable that is included in X. Hence, before making the selection, compute the average target (y value) per group in the grouping column (which is included in X hence, is a predictor) over the training set only as avaialble at this time. Select the n samples per group with the lowest average target (y-value) in the remaining testing set and inject them back into the training set.
+Include a scikit learn doc string including usage examples.

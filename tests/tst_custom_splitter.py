@@ -1,357 +1,304 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for custom_splitter.py."""
+"""unit tests for custom_splitter.py
+v001
 
-import sys
+@author: david.steyrl@gmail.com
+"""
+
 import numpy as np
 import pandas as pd
-import pytest
+import sys
+import unittest
 
-sys.path.append(r"../scr/")
+sys.path.append("../scr/")
 
+# Import classes and helper directly from the custom module
+# Replace 'custom_splitter' with your module filename if different.
 from custom_splitter import (
+    _validate_groups,
     GroupKFold,
     RepeatedGroupKFold,
-    TargetSortedGroupShuffleSplit,
-    _validate_groups,
+    ExtendedGroupShuffleSplit,
 )
 
-# =============================================================================
-# Helper Function Tests: _validate_groups
-# =============================================================================
+
+class TestValidateGroups(unittest.TestCase):
+    """Tests for the helper function `_validate_groups`."""
+
+    def test_valid_groups(self):
+        groups = [1, 1, 2, 2, 3]
+        validated = _validate_groups(groups)
+        self.assertIsInstance(validated, np.ndarray)
+        np.testing.assert_array_equal(validated, np.array(groups))
+
+    def test_none_groups_raises_value_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            _validate_groups(None)
+        self.assertIn("parameter should not be None", str(ctx.exception))
 
 
-def test_validate_groups_valid():
-    """Test _validate_groups with valid input list/array."""
-    groups = [1, 1, 2, 2, 3]
-    validated = _validate_groups(groups)
-    assert isinstance(validated, np.ndarray)
-    np.testing.assert_array_equal(validated, np.array([1, 1, 2, 2, 3]))
+class TestGroupKFold(unittest.TestCase):
+    """Tests for `GroupKFold` cross-validator."""
 
+    def setUp(self):
+        self.X = np.ones((12, 2))
+        self.y = np.arange(12)
+        self.groups = np.array([1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5])
 
-def test_validate_groups_none_raises():
-    """Test _validate_groups raises ValueError when groups is None."""
-    with pytest.raises(ValueError, match="The 'groups' parameter should not be None."):
-        _validate_groups(None)
-
-
-# =============================================================================
-# GroupKFold Tests
-# =============================================================================
-
-
-class TestGroupKFold:
-    @pytest.fixture
-    def sample_data(self):
-        X = np.arange(12).reshape(6, 2)
-        y = np.array([1, 2, 3, 4, 5, 6])
-        groups = np.array([1, 1, 2, 2, 3, 3])
-        return X, y, groups
-
-    def test_basic_split_count_and_non_overlapping_groups(self, sample_data):
-        X, y, groups = sample_data
+    def test_basic_split_folds(self):
         gkf = GroupKFold(n_splits=3)
-        splits = list(gkf.split(X, y, groups))
-
-        assert len(splits) == 3
-
+        splits = list(gkf.split(self.X, self.y, self.groups))
+        
+        self.assertEqual(len(splits), 3)
+        
         all_test_indices = []
         for train_idx, test_idx in splits:
-            # Validate non-overlapping group constraint
-            train_groups = set(groups[train_idx])
-            test_groups = set(groups[test_idx])
-            assert train_groups.isdisjoint(test_groups)
+            # Check train and test index overlap
+            self.assertEqual(len(np.intersect1d(train_idx, test_idx)), 0)
+            # Check that all indices total the dataset size
+            self.assertEqual(len(train_idx) + len(test_idx), len(self.X))
             all_test_indices.extend(test_idx)
+            
+        # Ensure test sets cover all indices without overlap
+        self.assertEqual(sorted(all_test_indices), list(range(len(self.X))))
 
-        # Validate that every sample is tested exactly once
-        assert sorted(all_test_indices) == list(range(len(X)))
+    def test_no_group_leakage(self):
+        gkf = GroupKFold(n_splits=3)
+        for train_idx, test_idx in gkf.split(self.X, self.y, self.groups):
+            train_groups = set(self.groups[train_idx])
+            test_groups = set(self.groups[test_idx])
+            self.assertTrue(train_groups.isdisjoint(test_groups))
 
-    def test_shuffle_reproducibility(self, sample_data):
-        X, y, groups = sample_data
+    def test_shuffle_reproducibility(self):
         gkf1 = GroupKFold(n_splits=3, shuffle=True, random_state=42)
         gkf2 = GroupKFold(n_splits=3, shuffle=True, random_state=42)
 
-        splits1 = list(gkf1.split(X, y, groups))
-        splits2 = list(gkf2.split(X, y, groups))
+        splits1 = list(gkf1.split(self.X, self.y, self.groups))
+        splits2 = list(gkf2.split(self.X, self.y, self.groups))
 
         for (tr1, te1), (tr2, te2) in zip(splits1, splits2):
             np.testing.assert_array_equal(tr1, tr2)
             np.testing.assert_array_equal(te1, te2)
 
-    def test_n_splits_greater_than_n_groups_raises(self, sample_data):
-        X, y, groups = sample_data
-        gkf = GroupKFold(n_splits=5)  # only 3 unique groups
-        with pytest.raises(
-            ValueError, match="Cannot have number of splits n_splits=5 greater than"
-        ):
-            list(gkf.split(X, y, groups))
+    def test_nsplits_greater_than_ngroups_raises(self):
+        gkf = GroupKFold(n_splits=10)
+        # 12 samples to match self.X and self.y, but only 2 unique groups (1 and 2)
+        groups_12_samples = np.array([1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2])
+        
+        with self.assertRaises(ValueError) as ctx:
+            list(gkf.split(self.X, self.y, groups=groups_12_samples))
+            
+        self.assertIn("greater than the number of groups", str(ctx.exception))
 
 
-# =============================================================================
-# RepeatedGroupKFold Tests
-# =============================================================================
+class TestRepeatedGroupKFold(unittest.TestCase):
+    """Tests for `RepeatedGroupKFold` cross-validator."""
 
+    def setUp(self):
+        self.X = np.ones((10, 2))
+        self.y = np.arange(10)
+        self.groups = np.array([1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
 
-class TestRepeatedGroupKFold:
     def test_repeated_splits_count(self):
-        X = np.arange(20).reshape(10, 2)
-        y = np.arange(10)
-        groups = np.array([1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+        n_splits, n_repeats = 3, 4
+        rgkf = RepeatedGroupKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=42)
+        splits = list(rgkf.split(self.X, self.y, self.groups))
+        self.assertEqual(len(splits), n_splits * n_repeats)
 
-        n_splits = 5
-        n_repeats = 3
-        rgkf = RepeatedGroupKFold(
-            n_splits=n_splits, n_repeats=n_repeats, random_state=42
-        )
+    def test_reproducibility(self):
+        rgkf1 = RepeatedGroupKFold(n_splits=2, n_repeats=2, random_state=123)
+        rgkf2 = RepeatedGroupKFold(n_splits=2, n_repeats=2, random_state=123)
 
-        splits = list(rgkf.split(X, y, groups))
-        assert len(splits) == n_splits * n_repeats
-
-    def test_repeat_reproducibility(self):
-        X = np.arange(12).reshape(6, 2)
-        y = np.arange(6)
-        groups = np.array([1, 1, 2, 2, 3, 3])
-
-        rgkf1 = RepeatedGroupKFold(n_splits=3, n_repeats=2, random_state=123)
-        rgkf2 = RepeatedGroupKFold(n_splits=3, n_repeats=2, random_state=123)
-
-        splits1 = list(rgkf1.split(X, y, groups))
-        splits2 = list(rgkf2.split(X, y, groups))
+        splits1 = list(rgkf1.split(self.X, self.y, self.groups))
+        splits2 = list(rgkf2.split(self.X, self.y, self.groups))
 
         for (tr1, te1), (tr2, te2) in zip(splits1, splits2):
             np.testing.assert_array_equal(tr1, tr2)
             np.testing.assert_array_equal(te1, te2)
 
 
-# =============================================================================
-# TargetSortedGroupShuffleSplit Tests
-# =============================================================================
+class TestExtendedGroupShuffleSplit(unittest.TestCase):
+    """Tests for `ExtendedGroupShuffleSplit` cross-validator and its edge cases."""
 
+    def setUp(self):
+        self.groups = np.array([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4])
+        self.X = pd.DataFrame({
+            "feat_group": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+            "feature_2": np.random.randn(16)
+        })
+        self.y = np.array([10, 10, 2, 2, 5, 5, 1, 1, 8, 8, 3, 3, 4, 4, 9, 9])
 
-class TestTargetSortedGroupShuffleSplit:
-    @pytest.fixture
-    def setup_dataframe_data(self):
-        df = pd.DataFrame(
-            {
-                "stim_id": [10, 10, 20, 20, 30, 30, 40, 40, 50, 50],
-                "feature1": np.linspace(0, 1, 10),
-                "feature2": np.linspace(10, 20, 10),
-            }
-        )
-        y = np.array([1.0, 3.0, 2.0, 4.0, 5.0, 1.0, 3.0, 3.0, 2.0, 6.0])
-        groups = np.array([1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
-        return df, y, groups
+    def test_get_n_splits(self):
+        egss = ExtendedGroupShuffleSplit(n_splits=7)
+        self.assertEqual(egss.get_n_splits(), 7)
 
-    def test_stim_id_extraction_pandas_dataframe_by_name(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(stim_id_col="stim_id")
-        extracted = splitter._extract_stim_ids(df)
-        np.testing.assert_array_equal(extracted, df["stim_id"].to_numpy())
+    def test_basic_splitting_without_replacement(self):
+        egss = ExtendedGroupShuffleSplit(n_splits=3, n_test_groups=1, replace=False, random_state=42)
+        splits = list(egss.split(self.X, self.y, self.groups))
+        self.assertEqual(len(splits), 3)
 
-    def test_stim_id_extraction_pandas_dataframe_by_int_index(
-        self, setup_dataframe_data
-    ):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(stim_id_col=0)
-        extracted = splitter._extract_stim_ids(df)
-        np.testing.assert_array_equal(extracted, df["stim_id"].to_numpy())
-
-    def test_stim_id_extraction_numpy_array_by_int_index(self):
-        X_arr = np.array([[10, 0.1], [10, 0.2], [20, 0.3], [20, 0.4]])
-        splitter = TargetSortedGroupShuffleSplit(stim_id_col=0)
-        extracted = splitter._extract_stim_ids(X_arr)
-        np.testing.assert_array_equal(extracted, np.array([10, 10, 20, 20]))
-
-    def test_stim_id_extraction_numpy_array_string_col_raises(self):
-        X_arr = np.array([[10, 0.1], [10, 0.2]])
-        splitter = TargetSortedGroupShuffleSplit(stim_id_col="stim_id")
-        with pytest.raises(ValueError, match="X is a numpy array without column names"):
-            splitter._extract_stim_ids(X_arr)
-
-    def test_basic_group_shuffle_default(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(
-            n_splits=3, test_size=0.4, random_state=42
-        )
-        splits = list(splitter.split(df, y, groups))
-
-        assert len(splits) == 3
+        tested_groups_per_split = []
         for train_idx, test_idx in splits:
-            train_groups = set(groups[train_idx])
-            test_groups = set(groups[test_idx])
-            assert train_groups.isdisjoint(test_groups)
+            test_grps = set(self.groups[test_idx])
+            self.assertEqual(len(test_grps), 1)
+            tested_groups_per_split.append(tuple(sorted(test_grps)))
 
-    def test_fixed_train_groups_enforcement(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        fixed_groups = [1, 2]
-        splitter = TargetSortedGroupShuffleSplit(
+        # Unique combinations tested because replace=False
+        self.assertEqual(len(set(tested_groups_per_split)), 3)
+
+    def test_float_n_test_groups(self):
+        # 4 unique groups * 0.5 = 2 test groups
+        egss = ExtendedGroupShuffleSplit(n_splits=1, n_test_groups=0.5, random_state=42)
+        for _, test_idx in egss.split(self.X, self.y, self.groups):
+            self.assertEqual(len(np.unique(self.groups[test_idx])), 2)
+
+    def test_train_groups_fixed(self):
+        egss = ExtendedGroupShuffleSplit(
+            n_splits=2, n_test_groups=1, train_groups=[1], random_state=42
+        )
+        for train_idx, test_idx in egss.split(self.X, self.y, self.groups):
+            train_grps = self.groups[train_idx]
+            test_grps = self.groups[test_idx]
+            
+            # Group 1 must be present in training
+            self.assertIn(1, train_grps)
+            # Group 1 must never leak into test
+            self.assertNotIn(1, test_grps)
+
+    def test_max_test_samples_per_group(self):
+        egss = ExtendedGroupShuffleSplit(
+            n_splits=1,
+            n_test_groups=2,
+            max_test_samples_per_group=2,
+            random_state=42
+        )
+        for _, test_idx in egss.split(self.X, self.y, self.groups):
+            # 2 test groups, maximum 2 samples per group = 4 total test samples
+            self.assertEqual(len(test_idx), 4)
+
+    def test_reinjection_random_strategy(self):
+        egss = ExtendedGroupShuffleSplit(
+            n_splits=1,
+            n_test_groups=1,
+            train_groups=[1],
+            max_test_samples_per_group=1,
+            n_inject_samples=2,
+            injection_strategy="random",
+            random_state=42
+        )
+        for train_idx, test_idx in egss.split(self.X, self.y, self.groups):
+            # Test has 1 sample
+            self.assertEqual(len(test_idx), 1)
+            # Train has: 4 base samples (group 1) + 2 injected samples = 6 samples
+            self.assertEqual(len(train_idx), 6)
+
+    def test_reinjection_lowest_target_strategy_pandas(self):
+        egss = ExtendedGroupShuffleSplit(
+            n_splits=1,
+            n_test_groups=1,
+            train_groups=[1],
+            max_test_samples_per_group=1,
+            n_inject_samples=1,
+            injection_strategy="lowest_target",
+            feature_group_col="feat_group",
+            random_state=42
+        )
+        for train_idx, test_idx in egss.split(self.X, self.y, self.groups):
+            self.assertEqual(len(test_idx), 1)
+            self.assertEqual(len(train_idx), 5)  # 4 base + 1 injected
+
+    def test_reinjection_lowest_target_strategy_numpy(self):
+        X_np = self.X.to_numpy()
+        egss = ExtendedGroupShuffleSplit(
+            n_splits=1,
+            n_test_groups=1,
+            train_groups=[1],
+            max_test_samples_per_group=1,
+            n_inject_samples=1,
+            injection_strategy="lowest_target",
+            feature_group_col=0,
+            random_state=42
+        )
+        for train_idx, test_idx in egss.split(X_np, self.y, self.groups):
+            self.assertEqual(len(test_idx), 1)
+            self.assertEqual(len(train_idx), 5)
+
+    def test_sample_and_reject_branch(self):
+        # Force low threshold to trigger sample-and-reject logic branch
+        egss = ExtendedGroupShuffleSplit(
             n_splits=3,
-            test_size=1,
-            fixed_train_groups=fixed_groups,
-            random_state=42,
+            n_test_groups=1,
+            replace=False,
+            max_combinations_exhaustive=2,
+            random_state=42
         )
-        splits = list(splitter.split(df, y, groups))
+        splits = list(egss.split(self.X, self.y, self.groups))
+        self.assertEqual(len(splits), 3)
 
-        for train_idx, test_idx in splits:
-            train_groups = set(groups[train_idx])
-            test_groups = set(groups[test_idx])
+    # --- Edge Cases & Validation Errors ---
 
-            # Fixed groups must strictly be present in training and absent from testing
-            for fg in fixed_groups:
-                assert fg in train_groups
-                assert fg not in test_groups
+    def test_invalid_n_test_groups_float(self):
+        egss = ExtendedGroupShuffleSplit(n_test_groups=1.5)
+        with self.assertRaises(ValueError):
+            list(egss.split(self.X, self.y, self.groups))
 
-    def test_integer_test_and_train_sizes(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(
-            n_splits=2, test_size=2, train_size=2, random_state=42
+    def test_invalid_n_test_groups_type(self):
+        egss = ExtendedGroupShuffleSplit(n_test_groups="invalid")
+        with self.assertRaises(TypeError):
+            list(egss.split(self.X, self.y, self.groups))
+
+    def test_no_candidate_groups_raises_error(self):
+        # Setting all groups as training groups leaves no testing candidate groups
+        egss = ExtendedGroupShuffleSplit(train_groups=[1, 2, 3, 4])
+        with self.assertRaises(ValueError) as ctx:
+            list(egss.split(self.X, self.y, self.groups))
+        self.assertIn("No candidate groups remaining", str(ctx.exception))
+
+    def test_n_test_groups_out_of_bounds(self):
+        egss = ExtendedGroupShuffleSplit(n_test_groups=10)
+        with self.assertRaises(ValueError):
+            list(egss.split(self.X, self.y, self.groups))
+
+    def test_invalid_max_test_samples_per_group(self):
+        egss = ExtendedGroupShuffleSplit(max_test_samples_per_group=0)
+        with self.assertRaises(ValueError):
+            list(egss.split(self.X, self.y, self.groups))
+
+    def test_missing_y_for_lowest_target_strategy(self):
+        egss = ExtendedGroupShuffleSplit(
+            n_test_groups=1,
+            max_test_samples_per_group=1,
+            n_inject_samples=1,
+            injection_strategy="lowest_target",
+            feature_group_col="feat_group"
         )
-        splits = list(splitter.split(df, y, groups))
+        with self.assertRaises(ValueError) as ctx:
+            list(egss.split(self.X, y=None, groups=self.groups))
+        self.assertIn("Target 'y' must be provided", str(ctx.exception))
 
-        for train_idx, test_idx in splits:
-            assert len(np.unique(groups[train_idx])) == 2
-            assert len(np.unique(groups[test_idx])) == 2
-
-    def test_subsampling_test_samples(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(
-            n_splits=2, test_size=2, n_test_samples=1, random_state=42
+    def test_missing_feature_group_col_for_lowest_target_strategy(self):
+        egss = ExtendedGroupShuffleSplit(
+            n_test_groups=1,
+            max_test_samples_per_group=1,
+            n_inject_samples=1,
+            injection_strategy="lowest_target",
+            feature_group_col=None
         )
-        splits = list(splitter.split(df, y, groups))
+        with self.assertRaises(ValueError) as ctx:
+            list(egss.split(self.X, y=self.y, groups=self.groups))
+        self.assertIn("feature_group_col' must be provided", str(ctx.exception))
 
-        for train_idx, test_idx in splits:
-            test_groups = groups[test_idx]
-            # Each test group should only contribute 1 sample
-            unique, counts = np.unique(test_groups, return_counts=True)
-            assert all(c == 1 for c in counts)
-
-    def test_train_samples_back_injection(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(
-            n_splits=1,
-            test_size=2,
-            n_test_samples=1,
-            n_train_samples_back=1,
-            sort_by_target=False,
-            random_state=42,
+    def test_unknown_injection_strategy(self):
+        egss = ExtendedGroupShuffleSplit(
+            n_test_groups=1,
+            max_test_samples_per_group=1,
+            n_inject_samples=1,
+            injection_strategy="unsupported_strategy"
         )
-        splits = list(splitter.split(df, y, groups))
-        train_idx, test_idx = splits[0]
-
-        # 3 groups in train (6 samples) + 1 back-injected unused test sample = 7 samples
-        assert len(train_idx) == 7
-        assert len(test_idx) == 2
-
-    def test_target_sorted_train_samples_back(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(
-            n_splits=1,
-            test_size=2,
-            n_test_samples=1,
-            n_train_samples_back=1,
-            sort_by_target=True,
-            stim_id_col="stim_id",
-            random_state=42,
-        )
-        splits = list(splitter.split(df, y, groups))
-        assert len(splits) == 1
-        train_idx, test_idx = splits[0]
-        assert len(train_idx) == 7
-        assert len(test_idx) == 2
-
-    def test_combinatorial_sampling_small_vs_large_combinations(self):
-        # Test small combinations (<= 10,000)
-        X = np.arange(20).reshape(10, 2)
-        groups = np.repeat(np.arange(5), 2)
-        splitter_small = TargetSortedGroupShuffleSplit(
-            n_splits=10, test_size=2, random_state=42
-        )
-        splits_small = list(splitter_small.split(X, groups=groups))
-        assert len(splits_small) == 10
-
-        # Test large combinations (> 10,000 combinations)
-        large_groups = np.repeat(np.arange(30), 2)
-        large_X = np.arange(120).reshape(60, 2)
-        splitter_large = TargetSortedGroupShuffleSplit(
-            n_splits=5, test_size=10, random_state=42
-        )
-        splits_large = list(splitter_large.split(large_X, groups=large_groups))
-        assert len(splits_large) == 5
-
-    # --- Exception Validation Tests ---
-
-    def test_no_remaining_pool_groups_raises(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        # Assign all unique groups (1 to 5) as fixed train groups
-        all_groups = list(np.unique(groups))
-        splitter = TargetSortedGroupShuffleSplit(fixed_train_groups=all_groups)
-        with pytest.raises(
-            ValueError, match="No eligible groups remaining for the test split pool."
-        ):
-            list(splitter.split(df, y, groups))
-
-    def test_sort_by_target_missing_y_raises(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        splitter = TargetSortedGroupShuffleSplit(sort_by_target=True)
-        with pytest.raises(
-            ValueError,
-            match="Target variable 'y' must be provided when sort_by_target=True",
-        ):
-            list(splitter.split(df, y=None, groups=groups))
-
-    def test_invalid_n_test_samples_raises(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        with pytest.raises(
-            ValueError, match="n_test_samples must be an integer or 'all'"
-        ):
-            splitter = TargetSortedGroupShuffleSplit(n_test_samples="invalid")
-            list(splitter.split(df, y, groups))
-
-        with pytest.raises(ValueError, match="n_test_samples must be >= 1"):
-            splitter = TargetSortedGroupShuffleSplit(n_test_samples=0)
-            list(splitter.split(df, y, groups))
-
-    def test_invalid_n_train_samples_back_raises(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        with pytest.raises(ValueError, match="n_train_samples_back must be an integer"):
-            splitter = TargetSortedGroupShuffleSplit(n_train_samples_back="invalid")
-            list(splitter.split(df, y, groups))
-
-        with pytest.raises(ValueError, match="n_train_samples_back must be >= 0"):
-            splitter = TargetSortedGroupShuffleSplit(n_train_samples_back=-1)
-            list(splitter.split(df, y, groups))
-
-    def test_invalid_test_size_raises(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        # Out of bounds int
-        with pytest.raises(
-            ValueError, match="should be a positive integer and smaller than"
-        ):
-            splitter = TargetSortedGroupShuffleSplit(test_size=10)
-            list(splitter.split(df, y, groups))
-
-        # Out of bounds float
-        with pytest.raises(ValueError, match="should be a float in the interval"):
-            splitter = TargetSortedGroupShuffleSplit(test_size=1.5)
-            list(splitter.split(df, y, groups))
-
-    def test_invalid_train_size_raises(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        with pytest.raises(
-            ValueError, match="should be a positive integer and smaller than"
-        ):
-            splitter = TargetSortedGroupShuffleSplit(train_size=10)
-            list(splitter.split(df, y, groups))
-
-        with pytest.raises(ValueError, match="should be a float in the interval"):
-            splitter = TargetSortedGroupShuffleSplit(train_size=1.5)
-            list(splitter.split(df, y, groups))
-
-    def test_train_and_test_size_sum_exceeds_groups_raises(self, setup_dataframe_data):
-        df, y, groups = setup_dataframe_data
-        with pytest.raises(ValueError, match="The sum of train_size and test_size"):
-            splitter = TargetSortedGroupShuffleSplit(train_size=3, test_size=3)
-            list(splitter.split(df, y, groups))
+        with self.assertRaises(ValueError) as ctx:
+            list(egss.split(self.X, y=self.y, groups=self.groups))
+        self.assertIn("Unknown injection strategy", str(ctx.exception))
 
 
 if __name__ == "__main__":
-    sys.exit(pytest.main(["-v", __file__]))
+    unittest.main()

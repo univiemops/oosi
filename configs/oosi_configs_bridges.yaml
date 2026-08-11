@@ -55,7 +55,7 @@ Y_BINARY_IND: []
 Y_MULTICLASS_IND: [0]
 
 # Specify data splitting scheme
-# Valid options: str of "RepeatedGroupKFold" or "TargetSortedGroupShuffleSplit"
+# Valid options: str of "RepeatedGroupKFold" or "ExtendedGroupShuffleSplit"
 SPLITTER: RepeatedGroupKFold
 
 # Parameters passed directly to the splitter class instantiation
