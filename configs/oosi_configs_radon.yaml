@@ -65,4 +65,5 @@ SPLITTER_PARAMS:
 
 # Define the list of active pipeline configurations to execute sequentially.
 # Each entry contains a label name and its respective pipeline instantiator function.
-PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]
+# PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]
+PIPELINE_CONFIGS: ["tabicl"]

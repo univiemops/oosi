@@ -1,210 +1,33 @@
-2026-08-11 15:26:31,566 - INFO - Logging established
-2026-08-11 15:26:31,568 - INFO - Logs save at: ../logs/oosi_1_mdl.log
-2026-08-11 15:26:31,667 - INFO - OS: Windows 11
-2026-08-11 15:26:31,668 - INFO - Python Version: 3.13.14
-2026-08-11 15:26:31,668 - INFO - Dependencies save at: ../logs/requirements_oosi_1_mdl.txt
-2026-08-11 15:26:31,675 - INFO - Config names loaded: bridges, concentration, diabetes, drug, employee, fear, housing, radon, wine
-2026-08-11 15:26:31,676 - INFO - Config file name to load: ../configs/oosi_configs_bridges.yaml
-2026-08-11 15:26:31,676 - INFO - Config file name to load: ../configs/oosi_configs_concentration.yaml
-2026-08-11 15:26:31,677 - INFO - Config file name to load: ../configs/oosi_configs_diabetes.yaml
-2026-08-11 15:26:31,678 - INFO - Config file name to load: ../configs/oosi_configs_drug.yaml
-2026-08-11 15:26:31,678 - INFO - Config file name to load: ../configs/oosi_configs_employee.yaml
-2026-08-11 15:26:31,679 - INFO - Config file name to load: ../configs/oosi_configs_fear.yaml
-2026-08-11 15:26:31,679 - INFO - Config file name to load: ../configs/oosi_configs_housing.yaml
-2026-08-11 15:26:31,680 - INFO - Config file name to load: ../configs/oosi_configs_radon.yaml
-2026-08-11 15:26:31,680 - INFO - Config file name to load: ../configs/oosi_configs_wine.yaml
-2026-08-11 15:26:32,057 - INFO - Config and data loaded: ../configs/oosi_configs_bridges.yaml
-2026-08-11 15:26:32,143 - INFO - Config and data loaded: ../configs/oosi_configs_concentration.yaml
-2026-08-11 15:26:32,257 - INFO - Config and data loaded: ../configs/oosi_configs_diabetes.yaml
-2026-08-11 15:26:32,314 - INFO - Config and data loaded: ../configs/oosi_configs_drug.yaml
-2026-08-11 15:26:32,711 - INFO - Config and data loaded: ../configs/oosi_configs_employee.yaml
-2026-08-11 15:26:38,092 - INFO - Config and data loaded: ../configs/oosi_configs_fear.yaml
-2026-08-11 15:26:41,805 - INFO - Config and data loaded: ../configs/oosi_configs_housing.yaml
-2026-08-11 15:26:41,957 - INFO - Config and data loaded: ../configs/oosi_configs_radon.yaml
-2026-08-11 15:26:42,028 - INFO - Config and data loaded: ../configs/oosi_configs_wine.yaml
-2026-08-11 15:26:42,029 - INFO - Out-of-Sample-Inference started: bridges__type
-2026-08-11 15:26:42,030 - INFO - Data sliced for type.
-2026-08-11 15:26:42,032 - INFO - Target type: multiclass | Classes: [0 1 2 3 4 5] | Total Classes: 6
-2026-08-11 15:26:42,032 - INFO - Out-of-Sample-Inference estimator: linear
-2026-08-11 15:26:42,056 - INFO - Fold 1: bridges type linear...
-2026-08-11 15:27:25,849 - INFO - predictor__C: 1.28
-2026-08-11 15:27:25,850 - INFO - predictor__l1_ratio: 0.95
-2026-08-11 15:27:26,021 - INFO - Avg Balanced Accuracy: 72.02
-2026-08-11 15:27:30,825 - INFO - Avg Shuffle target Balanced Accuracy: 13.10
-2026-08-11 15:27:33,236 - INFO - Results saved. Fold run time: 51.18s
-2026-08-11 15:27:33,358 - INFO - Fold 2: bridges type linear...
-2026-08-11 15:27:54,950 - INFO - predictor__C: 0.39
-2026-08-11 15:27:54,951 - INFO - predictor__l1_ratio: 0.93
-2026-08-11 15:27:54,974 - INFO - Avg Balanced Accuracy: 70.18
-2026-08-11 15:27:57,537 - INFO - Avg Shuffle target Balanced Accuracy: 6.55
-2026-08-11 15:27:59,960 - INFO - Results saved. Fold run time: 26.60s
-2026-08-11 15:28:00,081 - INFO - Fold 3: bridges type linear...
-2026-08-11 15:28:22,193 - INFO - predictor__C: 3.78
-2026-08-11 15:28:22,193 - INFO - predictor__l1_ratio: 0.33
-2026-08-11 15:28:23,029 - INFO - Avg Balanced Accuracy: 61.60
-2026-08-11 15:28:25,654 - INFO - Avg Shuffle target Balanced Accuracy: 7.14
-2026-08-11 15:28:28,066 - INFO - Results saved. Fold run time: 27.98s
-2026-08-11 15:28:28,189 - INFO - Fold 4: bridges type linear...
-2026-08-11 15:28:50,257 - INFO - predictor__C: 0.18
-2026-08-11 15:28:50,257 - INFO - predictor__l1_ratio: 0.79
-2026-08-11 15:28:50,275 - INFO - Avg Balanced Accuracy: 60.55
-2026-08-11 15:28:52,774 - INFO - Avg Shuffle target Balanced Accuracy: 11.38
-2026-08-11 15:28:55,172 - INFO - Results saved. Fold run time: 26.98s
-2026-08-11 15:28:55,291 - INFO - Fold 5: bridges type linear...
-2026-08-11 15:29:35,396 - INFO - predictor__C: 14.17
-2026-08-11 15:29:35,397 - INFO - predictor__l1_ratio: 0.15
-2026-08-11 15:29:35,453 - INFO - Avg Balanced Accuracy: 57.91
-2026-08-11 15:29:38,023 - INFO - Avg Shuffle target Balanced Accuracy: 9.10
-2026-08-11 15:29:40,458 - INFO - Results saved. Fold run time: 45.17s
-2026-08-11 15:29:40,594 - INFO - Fold 6: bridges type linear...
-2026-08-11 15:30:03,232 - INFO - predictor__C: 3.26
-2026-08-11 15:30:03,233 - INFO - predictor__l1_ratio: 0.81
-2026-08-11 15:30:04,058 - INFO - Avg Balanced Accuracy: 54.28
-2026-08-11 15:30:06,582 - INFO - Avg Shuffle target Balanced Accuracy: 10.13
-2026-08-11 15:30:09,013 - INFO - Results saved. Fold run time: 28.42s
-2026-08-11 15:30:09,142 - INFO - Fold 7: bridges type linear...
-2026-08-11 15:30:32,193 - INFO - predictor__C: 0.56
-2026-08-11 15:30:32,193 - INFO - predictor__l1_ratio: 1.00
-2026-08-11 15:30:32,216 - INFO - Avg Balanced Accuracy: 53.82
-2026-08-11 15:30:34,786 - INFO - Avg Shuffle target Balanced Accuracy: 12.97
-2026-08-11 15:30:37,202 - INFO - Results saved. Fold run time: 28.06s
-2026-08-11 15:30:37,326 - INFO - Fold 8: bridges type linear...
-2026-08-11 15:31:16,930 - INFO - predictor__C: 0.22
-2026-08-11 15:31:16,930 - INFO - predictor__l1_ratio: 0.90
-2026-08-11 15:31:16,946 - INFO - Avg Balanced Accuracy: 54.73
-2026-08-11 15:31:19,739 - INFO - Avg Shuffle target Balanced Accuracy: 13.66
-2026-08-11 15:31:22,144 - INFO - Results saved. Fold run time: 44.82s
-2026-08-11 15:31:22,268 - INFO - Fold 9: bridges type linear...
-2026-08-11 15:32:02,163 - INFO - predictor__C: 2.13
-2026-08-11 15:32:02,164 - INFO - predictor__l1_ratio: 0.96
-2026-08-11 15:32:02,254 - INFO - Avg Balanced Accuracy: 54.09
-2026-08-11 15:32:04,855 - INFO - Avg Shuffle target Balanced Accuracy: 12.14
-2026-08-11 15:32:07,262 - INFO - Results saved. Fold run time: 44.99s
-2026-08-11 15:32:07,383 - INFO - Fold 10: bridges type linear...
-2026-08-11 15:32:47,098 - INFO - predictor__C: 0.34
-2026-08-11 15:32:47,099 - INFO - predictor__l1_ratio: 0.16
-2026-08-11 15:32:47,137 - INFO - Avg Balanced Accuracy: 55.30
-2026-08-11 15:32:49,681 - INFO - Avg Shuffle target Balanced Accuracy: 11.79
-2026-08-11 15:32:52,132 - INFO - Results saved. Fold run time: 44.75s
-2026-08-11 15:32:52,257 - INFO - Fold 11: bridges type linear...
-2026-08-11 15:33:15,433 - INFO - predictor__C: 0.44
-2026-08-11 15:33:15,434 - INFO - predictor__l1_ratio: 0.96
-2026-08-11 15:33:15,461 - INFO - Avg Balanced Accuracy: 54.48
-2026-08-11 15:33:18,072 - INFO - Avg Shuffle target Balanced Accuracy: 13.66
-2026-08-11 15:33:20,469 - INFO - Results saved. Fold run time: 28.21s
-2026-08-11 15:33:20,611 - INFO - Fold 12: bridges type linear...
-2026-08-11 15:33:43,360 - INFO - predictor__C: 1.21
-2026-08-11 15:33:43,361 - INFO - predictor__l1_ratio: 0.99
-2026-08-11 15:33:43,471 - INFO - Avg Balanced Accuracy: 53.18
-2026-08-11 15:33:46,065 - INFO - Avg Shuffle target Balanced Accuracy: 14.38
-2026-08-11 15:33:48,453 - INFO - Results saved. Fold run time: 27.84s
-2026-08-11 15:33:48,569 - INFO - Fold 13: bridges type linear...
-2026-08-11 15:34:28,272 - INFO - predictor__C: 0.06
-2026-08-11 15:34:28,272 - INFO - predictor__l1_ratio: 0.54
-2026-08-11 15:34:28,286 - INFO - Avg Balanced Accuracy: 53.25
-2026-08-11 15:34:30,927 - INFO - Avg Shuffle target Balanced Accuracy: 13.27
-2026-08-11 15:34:33,376 - INFO - Results saved. Fold run time: 44.81s
-2026-08-11 15:34:33,512 - INFO - Fold 14: bridges type linear...
-2026-08-11 15:34:56,200 - INFO - predictor__C: 0.24
-2026-08-11 15:34:56,200 - INFO - predictor__l1_ratio: 0.91
-2026-08-11 15:34:56,217 - INFO - Avg Balanced Accuracy: 53.51
-2026-08-11 15:34:58,803 - INFO - Avg Shuffle target Balanced Accuracy: 13.49
-2026-08-11 15:35:01,281 - INFO - Results saved. Fold run time: 27.77s
-2026-08-11 15:35:01,415 - INFO - Fold 15: bridges type linear...
-2026-08-11 15:35:23,807 - INFO - predictor__C: 0.18
-2026-08-11 15:35:23,807 - INFO - predictor__l1_ratio: 0.99
-2026-08-11 15:35:23,830 - INFO - Avg Balanced Accuracy: 53.61
-2026-08-11 15:35:26,477 - INFO - Avg Shuffle target Balanced Accuracy: 14.93
-2026-08-11 15:35:28,955 - INFO - Results saved. Fold run time: 27.54s
-2026-08-11 15:35:29,076 - INFO - Fold 16: bridges type linear...
-2026-08-11 15:35:51,673 - INFO - predictor__C: 0.41
-2026-08-11 15:35:51,674 - INFO - predictor__l1_ratio: 0.98
-2026-08-11 15:35:51,695 - INFO - Avg Balanced Accuracy: 54.56
-2026-08-11 15:35:54,262 - INFO - Avg Shuffle target Balanced Accuracy: 14.99
-2026-08-11 15:35:56,704 - INFO - Results saved. Fold run time: 27.63s
-2026-08-11 15:35:56,825 - INFO - Fold 17: bridges type linear...
-2026-08-11 15:36:19,472 - INFO - predictor__C: 24.12
-2026-08-11 15:36:19,473 - INFO - predictor__l1_ratio: 0.94
-2026-08-11 15:36:20,448 - INFO - Avg Balanced Accuracy: 54.56
-2026-08-11 15:36:23,058 - INFO - Avg Shuffle target Balanced Accuracy: 15.23
-2026-08-11 15:36:25,483 - INFO - Results saved. Fold run time: 28.66s
-2026-08-11 15:36:25,607 - INFO - Fold 18: bridges type linear...
-2026-08-11 15:36:48,207 - INFO - predictor__C: 0.32
-2026-08-11 15:36:48,208 - INFO - predictor__l1_ratio: 0.94
-2026-08-11 15:36:48,226 - INFO - Avg Balanced Accuracy: 55.28
-2026-08-11 15:36:50,773 - INFO - Avg Shuffle target Balanced Accuracy: 16.16
-2026-08-11 15:36:53,242 - INFO - Results saved. Fold run time: 27.63s
-2026-08-11 15:36:53,361 - INFO - Fold 19: bridges type linear...
-2026-08-11 15:37:16,222 - INFO - predictor__C: 20.44
-2026-08-11 15:37:16,222 - INFO - predictor__l1_ratio: 0.83
-2026-08-11 15:37:16,369 - INFO - Avg Balanced Accuracy: 56.25
-2026-08-11 15:37:18,869 - INFO - Avg Shuffle target Balanced Accuracy: 16.30
-2026-08-11 15:37:21,345 - INFO - Results saved. Fold run time: 27.98s
-2026-08-11 15:37:21,489 - INFO - Fold 20: bridges type linear...
-2026-08-11 15:37:43,420 - INFO - predictor__C: 0.29
-2026-08-11 15:37:43,421 - INFO - predictor__l1_ratio: 0.97
-2026-08-11 15:37:43,442 - INFO - Avg Balanced Accuracy: 55.73
-2026-08-11 15:37:45,743 - INFO - Avg Shuffle target Balanced Accuracy: 15.69
-2026-08-11 15:37:48,186 - INFO - Results saved. Fold run time: 26.70s
-2026-08-11 15:37:48,306 - INFO - Fold 21: bridges type linear...
-2026-08-11 15:38:10,976 - INFO - predictor__C: 1.79
-2026-08-11 15:38:10,977 - INFO - predictor__l1_ratio: 1.00
-2026-08-11 15:38:11,041 - INFO - Avg Balanced Accuracy: 56.03
-2026-08-11 15:38:13,604 - INFO - Avg Shuffle target Balanced Accuracy: 16.15
-2026-08-11 15:38:16,088 - INFO - Results saved. Fold run time: 27.78s
-2026-08-11 15:38:16,212 - INFO - Fold 22: bridges type linear...
-2026-08-11 15:38:38,751 - INFO - predictor__C: 1.64
-2026-08-11 15:38:38,752 - INFO - predictor__l1_ratio: 0.89
-2026-08-11 15:38:38,847 - INFO - Avg Balanced Accuracy: 56.59
-2026-08-11 15:38:41,420 - INFO - Avg Shuffle target Balanced Accuracy: 16.32
-2026-08-11 15:38:43,905 - INFO - Results saved. Fold run time: 27.69s
-2026-08-11 15:38:44,028 - INFO - Fold 23: bridges type linear...
-2026-08-11 15:39:05,498 - INFO - predictor__C: 10.64
-2026-08-11 15:39:05,499 - INFO - predictor__l1_ratio: 0.95
-2026-08-11 15:39:05,676 - INFO - Avg Balanced Accuracy: 55.86
-2026-08-11 15:39:07,827 - INFO - Avg Shuffle target Balanced Accuracy: 16.85
-2026-08-11 15:39:09,917 - INFO - Results saved. Fold run time: 25.89s
-2026-08-11 15:39:10,039 - INFO - Fold 24: bridges type linear...
-2026-08-11 15:39:27,258 - INFO - predictor__C: 0.82
-2026-08-11 15:39:27,259 - INFO - predictor__l1_ratio: 0.91
-2026-08-11 15:39:27,279 - INFO - Avg Balanced Accuracy: 55.59
-2026-08-11 15:39:29,395 - INFO - Avg Shuffle target Balanced Accuracy: 16.22
-2026-08-11 15:39:31,466 - INFO - Results saved. Fold run time: 21.43s
-2026-08-11 15:39:31,593 - INFO - Fold 25: bridges type linear...
-2026-08-11 15:39:53,733 - INFO - predictor__C: 0.32
-2026-08-11 15:39:53,734 - INFO - predictor__l1_ratio: 0.97
-2026-08-11 15:39:53,754 - INFO - Avg Balanced Accuracy: 55.22
-2026-08-11 15:39:56,424 - INFO - Avg Shuffle target Balanced Accuracy: 15.79
-2026-08-11 15:39:58,933 - INFO - Results saved. Fold run time: 27.34s
-2026-08-11 15:39:59,063 - INFO - Fold 26: bridges type linear...
-2026-08-11 15:40:22,464 - INFO - predictor__C: 29.18
-2026-08-11 15:40:22,465 - INFO - predictor__l1_ratio: 0.99
-2026-08-11 15:40:22,674 - INFO - Avg Balanced Accuracy: 54.91
-2026-08-11 15:40:25,283 - INFO - Avg Shuffle target Balanced Accuracy: 16.37
-2026-08-11 15:40:27,786 - INFO - Results saved. Fold run time: 28.72s
-2026-08-11 15:40:27,908 - INFO - Fold 27: bridges type linear...
-2026-08-11 15:40:50,645 - INFO - predictor__C: 8.59
-2026-08-11 15:40:50,646 - INFO - predictor__l1_ratio: 0.90
-2026-08-11 15:40:51,622 - INFO - Avg Balanced Accuracy: 54.72
-2026-08-11 15:40:54,345 - INFO - Avg Shuffle target Balanced Accuracy: 16.81
-2026-08-11 15:40:56,835 - INFO - Results saved. Fold run time: 28.93s
-2026-08-11 15:40:56,958 - INFO - Fold 28: bridges type linear...
-2026-08-11 15:41:19,349 - INFO - predictor__C: 1.58
-2026-08-11 15:41:19,349 - INFO - predictor__l1_ratio: 0.83
-2026-08-11 15:41:20,335 - INFO - Avg Balanced Accuracy: 54.56
-2026-08-11 15:41:22,937 - INFO - Avg Shuffle target Balanced Accuracy: 16.65
-2026-08-11 15:41:25,433 - INFO - Results saved. Fold run time: 28.47s
-2026-08-11 15:41:25,561 - INFO - Fold 29: bridges type linear...
-2026-08-11 15:41:48,341 - INFO - predictor__C: 0.20
-2026-08-11 15:41:48,342 - INFO - predictor__l1_ratio: 0.78
-2026-08-11 15:41:48,357 - INFO - Avg Balanced Accuracy: 54.21
-2026-08-11 15:41:50,920 - INFO - Avg Shuffle target Balanced Accuracy: 16.07
-2026-08-11 15:41:53,425 - INFO - Results saved. Fold run time: 27.86s
-2026-08-11 15:41:53,550 - INFO - Fold 30: bridges type linear...
-2026-08-11 15:42:33,540 - INFO - predictor__C: 6.27
-2026-08-11 15:42:33,541 - INFO - predictor__l1_ratio: 0.34
-2026-08-11 15:42:34,402 - INFO - Avg Balanced Accuracy: 54.58
-2026-08-11 15:42:36,986 - INFO - Avg Shuffle target Balanced Accuracy: 16.19
-2026-08-11 15:42:39,513 - INFO - Results saved. Fold run time: 45.96s
-2026-08-11 15:42:39,639 - INFO - Out-of-Sample-Inference estimator: gb
-2026-08-11 15:42:39,642 - INFO - Fold 1: bridges type gb...
+2026-08-13 10:23:40,726 - INFO - [+] Logging established
+2026-08-13 10:23:40,727 - INFO -  -> Logs save at: ../logs/oosi_1_mdl.log
+2026-08-13 10:23:40,769 - INFO - [+] Document requirements
+2026-08-13 10:23:40,769 - INFO -  -> OS: Windows 11
+2026-08-13 10:23:40,770 - INFO -  -> Python Version: 3.13.13
+2026-08-13 10:23:40,770 - INFO -  -> Dependencies saved at: ../logs/requirements_oosi_1_mdl.txt
+2026-08-13 10:23:40,771 - INFO - [+] Config names loaded: radon
+2026-08-13 10:23:40,771 - INFO -  -> Config file name to load: ../configs/oosi_configs_radon.yaml
+2026-08-13 10:23:40,908 - INFO -  -> Config and data loaded: ../configs/oosi_configs_radon.yaml
+2026-08-13 10:23:40,909 - INFO - [+] Out-of-Sample-Inference started: radon__log_radon
+2026-08-13 10:23:40,909 - INFO -  -> Data sliced for log_radon.
+2026-08-13 10:23:40,910 - INFO -  -> Target type: continuous | Classes: [None] | Total Classes: None
+2026-08-13 10:23:40,910 - INFO -  -> Out-of-Sample-Inference estimator: tabicl
+2026-08-13 10:23:40,921 - INFO - [+] Fold 1: radon log_radon tabicl...
+2026-08-13 10:23:41,829 - INFO -  -> x_tst downsampled to 100 samples for shapiq
+2026-08-13 10:23:41,910 - INFO -  --> Avg Mean Absolute Error (MAE): 0.61
+2026-08-13 10:23:41,911 - INFO -  --> Avg Coefficient of Determination (R²): 18.55
+2026-08-13 10:23:44,523 - INFO -  --> Avg Shuffle target Mean Absolute Error (MAE): 0.69
+2026-08-13 10:23:44,524 - INFO -  --> Avg Shuffle target Coefficient of Determination (R²): -1.40
+2026-08-13 10:23:47,136 - INFO - [\u2713] Results saved. Fold run time: 6.21s
+2026-08-13 10:23:47,257 - INFO - [+] Fold 2: radon log_radon tabicl...
+2026-08-13 10:23:47,815 - INFO -  -> x_tst downsampled to 100 samples for shapiq
+2026-08-13 10:23:47,849 - INFO -  --> Avg Mean Absolute Error (MAE): 0.60
+2026-08-13 10:23:47,849 - INFO -  --> Avg Coefficient of Determination (R²): 18.09
+2026-08-13 10:23:50,126 - INFO -  --> Avg Shuffle target Mean Absolute Error (MAE): 0.68
+2026-08-13 10:23:50,126 - INFO -  --> Avg Shuffle target Coefficient of Determination (R²): -1.37
+2026-08-13 10:23:52,353 - INFO - [\u2713] Results saved. Fold run time: 5.10s
+2026-08-13 10:23:52,464 - INFO - [+] Fold 3: radon log_radon tabicl...
+2026-08-13 10:23:53,053 - INFO -  -> x_tst downsampled to 100 samples for shapiq
+2026-08-13 10:23:53,084 - INFO -  --> Avg Mean Absolute Error (MAE): 0.58
+2026-08-13 10:23:53,084 - INFO -  --> Avg Coefficient of Determination (R²): 22.43
+2026-08-13 10:23:55,480 - INFO -  --> Avg Shuffle target Mean Absolute Error (MAE): 0.67
+2026-08-13 10:23:55,480 - INFO -  --> Avg Shuffle target Coefficient of Determination (R²): -1.52

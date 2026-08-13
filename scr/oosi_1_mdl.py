@@ -85,8 +85,8 @@ def setup_logging() -> None:
     console_handler.setLevel(logging.INFO)
     logging.getLogger().addHandler(console_handler)
 
-    logging.info("Logging established")
-    logging.info(f"Logs save at: {log_file}")
+    logging.info("[+] Logging established")
+    logging.info(f" -> Logs save at: {log_file}")
 
 
 def document_requirements() -> None:
@@ -105,9 +105,10 @@ def document_requirements() -> None:
     with open(req_file, "w", encoding="utf-8") as file:
         file.write("\n".join(lines) + "\n")
 
-    logging.info(f"OS: {platform.system()} {platform.release()}")
-    logging.info(f"Python Version: {platform.python_version()}")
-    logging.info(f"Dependencies save at: {req_file}")
+    logging.info("[+] Document requirements")
+    logging.info(f" -> OS: {platform.system()} {platform.release()}")
+    logging.info(f" -> Python Version: {platform.python_version()}")
+    logging.info(f" -> Dependencies saved at: {req_file}")
 
 
 def get_configs_names(file_path: str) -> List[str]:
@@ -126,7 +127,7 @@ def get_configs_names(file_path: str) -> List[str]:
     with open(file_path, "r", encoding="utf-8") as file:
         configs_names = yaml.safe_load(file)["CONFIGS_NAMES"]
 
-    logging.info(f"Config names loaded: {', '.join(configs_names)}")
+    logging.info(f"[+] Config names loaded: {', '.join(configs_names)}")
     return configs_names
 
 
@@ -147,7 +148,7 @@ def get_configs_file_names(configs_names: List[str]) -> List[str]:
         f"../configs/oosi_configs_{name}.yaml" for name in configs_names
     ]
     for name in config_file_names:
-        logging.info(f"Config file name to load: {name}")
+        logging.info(f" -> Config file name to load: {name}")
     return config_file_names
 
 
@@ -186,7 +187,7 @@ def get_configs(configs_file_names: List[str]) -> List[Dict[str, Any]]:
             config[key] = df.reindex(cols, axis=1)
 
         configs.append(config)
-        logging.info(f"Config and data loaded: {file_name}")
+        logging.info(f" -> Config and data loaded: {file_name}")
 
     return configs
 
@@ -219,10 +220,10 @@ def get_data(
     g_df = config["G"].reindex(index=y_df.index)
     x_df = config["X"].reindex(index=y_df.index)
 
-    logging.info(f"Data sliced for {y_name}.")
+    logging.info(f" -> Data sliced for {y_name}.")
     dropped = config["Y"].shape[0] - y_df.shape[0]
     if dropped > 0:
-        logging.info(f"{dropped} samples dropped due to NaNs in {y_name}.")
+        logging.info(f" --> {dropped} samples dropped due to NaNs in {y_name}.")
 
     return x_df, y_df, g_df
 
@@ -750,14 +751,14 @@ def log_metrics(scores_list: List[Dict[str, Any]], prefix: str = "") -> None:
 
     if scores_list[0]["target_type"] == "continuous":
         logging.info(
-            f"{label} Mean Absolute Error (MAE): {np.mean([i['mae'] for i in scores_list]):.2f}"
+            f" --> {label} Mean Absolute Error (MAE): {np.mean([i['mae'] for i in scores_list]):.2f}"
         )
         logging.info(
-            f"{label} Coefficient of Determination (R²): {np.mean([i['r2'] for i in scores_list]) * 100:.2f}"
+            f" --> {label} Coefficient of Determination (R²): {np.mean([i['r2'] for i in scores_list]) * 100:.2f}"
         )
     else:
         logging.info(
-            f"{label} Balanced Accuracy: {np.mean([i['acc'] for i in scores_list]) * 100:.2f}"
+            f" --> {label} Balanced Accuracy: {np.mean([i['acc'] for i in scores_list]) * 100:.2f}"
         )
 
 
@@ -779,8 +780,8 @@ def downsample_if_needed(arr: np.ndarray, target_size: int, label: str) -> np.nd
         Original data array or downsampled sample array.
     """
     if arr.shape[0] > target_size:
-        logging.info(f"{label} downsampled to {target_size} samples for shapiq")
-        return resample(arr, replace=False, n_samples=target_size)
+        logging.info(f" -> {label} downsampled to {target_size} samples for shapiq")
+        return resample(arr, replace=False, n_samples=target_size, random_state=3141592)
 
     return arr
 
@@ -800,7 +801,7 @@ def main() -> None:
     for config in configs:
         for target_idx, y_name in enumerate(config["Y_NAMES"]):
             analysis_name = f"{config['ANALYSIS_NAME']}__{y_name}"
-            logging.info(f"Out-of-Sample-Inference started: {analysis_name}")
+            logging.info(f"[+] Out-of-Sample-Inference started: {analysis_name}")
             x_df, y_df, g_df = get_data(config, y_name)
 
             if target_idx in config["Y_CONTINUOUS_IND"]:
@@ -813,12 +814,12 @@ def main() -> None:
                 n_classes = y_df.nunique()[y_name]
 
             logging.info(
-                f"Target type: {target_type} | Classes: {classes} | Total Classes: {n_classes}"
+                f" -> Target type: {target_type} | Classes: {classes} | Total Classes: {n_classes}"
             )
             n_features = len(config["X_NAMES"])
 
             for pipe_name in config["PIPELINE_CONFIGS"]:
-                logging.info(f"Out-of-Sample-Inference estimator: {pipe_name}")
+                logging.info(f" -> Out-of-Sample-Inference estimator: {pipe_name}")
                 save_path = f"../results/{analysis_name}/{pipe_name}"
                 os.makedirs(save_path, exist_ok=True)
 
@@ -849,7 +850,7 @@ def main() -> None:
                     cv.split(x_df, y=y_df, groups=g_df)
                 ):
                     logging.info(
-                        f"Fold {fold_idx + 1}: {config['ANALYSIS_NAME']} {y_name} {pipe_name}..."
+                        f"[+] Fold {fold_idx + 1}: {config['ANALYSIS_NAME']} {y_name} {pipe_name}..."
                     )
                     start_time = time.time()
 
@@ -859,14 +860,6 @@ def main() -> None:
                     g_tst = g_df.iloc[test_idx].to_numpy().squeeze()
                     x_tst = x_df.iloc[test_idx].to_numpy().squeeze()
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
-
-                    x_trn_sample = downsample_if_needed(
-                        arr=x_trn, target_size=1000, label="x_trn"
-                    )
-                    x_tst_sample = downsample_if_needed(
-                        arr=x_tst, target_size=100, label="x_tst"
-                    )
-                    total_x_tst_sample_shapiq.append(x_tst_sample)
 
                     raw_estimator, search_space, scorer = get_estimator_pipeline(
                         config, target_type, n_classes, pipe_name
@@ -879,11 +872,11 @@ def main() -> None:
                             n_iter=100,
                             scoring=scorer,
                             n_jobs=-2,
-                            cv=RepeatedGroupKFold(n_splits=5, n_repeats=6),
+                            cv=RepeatedGroupKFold(n_splits=5, n_repeats=1),
                         ).fit(X=x_trn, y=y_trn, groups=g_trn)
                         total_best_params.append(search.best_params_)
                         for k, v in search.best_params_.items():
-                            logging.info(f"{k}: {v:.2f}")
+                            logging.info(f" -> {k}: {v:.2f}")
                         estimator = search.best_estimator_
                     else:
                         estimator = raw_estimator.fit(X=x_trn, y=y_trn)
@@ -895,6 +888,14 @@ def main() -> None:
                             "Shuffle target ",
                         ),
                     }
+
+                    x_trn_sample = downsample_if_needed(
+                        arr=x_trn, target_size=1000, label="x_trn"
+                    )
+                    x_tst_sample = downsample_if_needed(
+                        arr=x_tst, target_size=100, label="x_tst"
+                    )
+                    total_x_tst_sample_shapiq.append(x_tst_sample)
 
                     for suffix, (mdl, log_prefix) in models_to_evaluate.items():
                         score_metrics = get_estimator_scores(
@@ -933,7 +934,7 @@ def main() -> None:
                             pkl.dump(datasets, f)
 
                     logging.info(
-                        f"Results saved. Fold run time: {time.time() - start_time:.2f}s"
+                        f"[✓] Results saved. Fold run time: {time.time() - start_time:.2f}s"
                     )
 
                     del raw_estimator
@@ -943,7 +944,7 @@ def main() -> None:
                     gc.collect()
                     torch.cuda.empty_cache()
 
-    logging.info("Out-of-Sample-Inference finished.")
+    logging.info("[✓] Out-of-Sample-Inference finished.")
 
 
 if __name__ == "__main__":
