@@ -16,7 +16,6 @@ import time
 import warnings
 from typing import Any, Dict, List, Tuple
 
-import multiprocessing as mp
 import numpy as np
 import pandas as pd
 import torch
@@ -24,7 +23,7 @@ import yaml
 
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, uniform
-from shapiq.explainer import TabularExplainer, TreeExplainer
+from shapiq.explainer import TabularExplainer
 from shapiq.interaction_values import InteractionValues
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
@@ -35,9 +34,7 @@ from sklearn.model_selection import KFold, RandomizedSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, TargetEncoder
 from sklearn.utils import resample, shuffle
-from sklearn.utils.validation import check_is_fitted
 from tabicl import TabICLClassifier, TabICLRegressor
-from tabicl._sklearn.sklearn_utils import validate_data
 from tabicl.shap import get_shapiq_explainer
 
 from custom_splitter import RepeatedGroupKFold, ExtendedGroupShuffleSplit
@@ -817,7 +814,6 @@ def main() -> None:
             logging.info(
                 f" -> Target type: {target_type} | Classes: {classes} | Total Classes: {n_classes}"
             )
-            n_features = len(config["X_NAMES"])
 
             for pipe_name in config["PIPELINE_CONFIGS"]:
                 logging.info(f" -> Out-of-Sample-Inference estimator: {pipe_name}")
@@ -858,7 +854,7 @@ def main() -> None:
                     g_trn = g_df.iloc[train_idx].to_numpy().squeeze()
                     x_trn = x_df.iloc[train_idx].to_numpy().squeeze()
                     y_trn = y_df.iloc[train_idx].to_numpy().squeeze()
-                    g_tst = g_df.iloc[test_idx].to_numpy().squeeze()
+                    g_tst = g_df.iloc[test_idx].to_numpy().squeeze()    #noqa
                     x_tst = x_df.iloc[test_idx].to_numpy().squeeze()
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 
@@ -873,7 +869,7 @@ def main() -> None:
                             n_iter=100,
                             scoring=scorer,
                             n_jobs=-2,
-                            cv=RepeatedGroupKFold(n_splits=5, n_repeats=1),
+                            cv=RepeatedGroupKFold(n_splits=5, n_repeats=6),
                         ).fit(X=x_trn, y=y_trn, groups=g_trn)
                         total_best_params.append(search.best_params_)
                         for k, v in search.best_params_.items():
