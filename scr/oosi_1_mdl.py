@@ -14,7 +14,7 @@ import pickle as pkl
 import platform
 import time
 import warnings
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -109,7 +109,7 @@ def document_requirements() -> None:
     logging.info(f" -> Dependencies saved at: {req_file}")
 
 
-def get_configs_names(file_path: str) -> List[str]:
+def get_configs_names(file_path: str) -> list[str]:
     """Load configuration names from a YAML file.
 
     Parameters
@@ -129,7 +129,7 @@ def get_configs_names(file_path: str) -> List[str]:
     return configs_names
 
 
-def get_configs_file_names(configs_names: List[str]) -> List[str]:
+def get_configs_file_names(configs_names: list[str]) -> list[str]:
     """Construct file paths for the configuration files based on config names.
 
     Parameters
@@ -150,7 +150,7 @@ def get_configs_file_names(configs_names: List[str]) -> List[str]:
     return config_file_names
 
 
-def get_configs(configs_file_names: List[str]) -> List[Dict[str, Any]]:
+def get_configs(configs_file_names: list[str]) -> list[dict[str, Any]]:
     """Load configuration details and datasets specified in YAML files.
 
     Reads configuration parameters from each path, loads data from the
@@ -191,8 +191,8 @@ def get_configs(configs_file_names: List[str]) -> List[Dict[str, Any]]:
 
 
 def get_data(
-    config: Dict[str, Any], y_name: str
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    config: dict[str, Any], y_name: str
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Extract and align feature, target, and group DataFrames for a target variable.
 
     Drops missing values from the target variable and aligns feature (X) and
@@ -227,7 +227,7 @@ def get_data(
 
 
 def get_preprocessor(
-    config: Dict[str, Any], target_type: str, pipe_name: str
+    config: dict[str, Any], target_type: str, pipe_name: str
 ) -> ColumnTransformer:
     """Create a ColumnTransformer preprocessor for continuous, binary, and categorical features.
 
@@ -317,8 +317,8 @@ def get_preprocessor(
 
 
 def get_estimator_pipeline(
-    config: Dict[str, Any], target_type: str, n_classes: int, pipe_name: str
-) -> Tuple[Pipeline, Dict[str, Any], str]:
+    config: dict[str, Any], target_type: str, n_classes: int, pipe_name: str
+) -> tuple[Pipeline, dict[str, Any], str]:
     """Construct estimator pipelines, parameter spaces, and evaluation metrics.
 
     Parameters
@@ -447,7 +447,7 @@ def get_estimator_pipeline(
     )
 
 
-def get_splitter(config: Dict[str, Any]):
+def get_splitter(config: dict[str, Any]):
     """Instantiate CV splitter dynamically based on YAML configurations.
 
     Parameters
@@ -476,7 +476,7 @@ def get_estimator_scores(
     y_tst: np.ndarray,
     target_type: str,
     sample_indices: np.ndarray,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Evaluate fitted estimator performance on test dataset and compile metrics.
 
     Parameters
@@ -568,7 +568,7 @@ def group_features(
 
 
 def reorder_interaction_values(
-    iv: InteractionValues, indices: List[int]
+    iv: InteractionValues, indices: list[int]
 ) -> InteractionValues:
     """Remap target indices within an InteractionValues instance according to a sequence map.
 
@@ -631,10 +631,10 @@ def explain_pipeline(
     x_tst: np.ndarray,
     pipe_name: str,
     target_type: str,
-    classes: List[Any] = None,
-    cat_ind: List[Any] = None,
-    x_names_sequence: List[Any] = None,
-) -> Dict[Any, Any]:
+    classes: list[Any] = None,
+    cat_ind: list[Any] = None,
+    x_names_sequence: list[Any] = None,
+) -> dict[Any, Any]:
     """Compute feature interaction explanations using SHAPIQ for model evaluation pipelines.
 
     Parameters
@@ -731,7 +731,7 @@ def explain_pipeline(
     return explanations
 
 
-def log_metrics(scores_list: List[Dict[str, Any]], prefix: str = "") -> None:
+def log_metrics(scores_list: list[dict[str, Any]], prefix: str = "") -> None:
     """Calculate and log aggregate performance metrics from evaluation scores.
 
     Parameters
@@ -854,7 +854,7 @@ def main() -> None:
                     g_trn = g_df.iloc[train_idx].to_numpy().squeeze()
                     x_trn = x_df.iloc[train_idx].to_numpy().squeeze()
                     y_trn = y_df.iloc[train_idx].to_numpy().squeeze()
-                    g_tst = g_df.iloc[test_idx].to_numpy().squeeze()    #noqa
+                    g_tst = g_df.iloc[test_idx].to_numpy().squeeze()  # noqa
                     x_tst = x_df.iloc[test_idx].to_numpy().squeeze()
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 
