@@ -683,11 +683,12 @@ def explain_pipeline(
                 max_order=2,
                 random_state=None,
                 verbose=False,
+                sample_size=None,
             )
             explanations[c_class] = explainer.explain_X(
                 x_tst,
                 n_jobs=-2,
-                budget=min(2**n_features, 10 * n_features + math.comb(n_features, 2)),
+                budget=min(2**n_features, 10*n_features + 10*math.comb(n_features, 2)),
             )
         elif pipe_name == "tabicl":
             explainer = get_shapiq_explainer(
@@ -701,7 +702,7 @@ def explain_pipeline(
             explanations[c_class] = explainer.explain_X(
                 estimator[0].transform(x_tst),
                 n_jobs=1,
-                budget=min(2**n_features, 10 * n_features + math.comb(n_features, 2)),
+                budget=min(2**n_features, 10*n_features + 10*math.comb(n_features, 2)),
             )
 
     if target_type == "multiclass" and pipe_name == "tabicl":
