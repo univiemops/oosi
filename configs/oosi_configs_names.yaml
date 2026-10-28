@@ -1,3 +1,4 @@
 # Specifiy configs names to run
 # Valid options: list of name(s) to identify .yaml configs data files
-CONFIGS_NAMES: [bridges, concentration, diabetes, drug, employee, fear, housing, radon, wine]
+# CONFIGS_NAMES: [bridges, concentration, diabetes, drug, employee, fear, housing, radon, wine]
+CONFIGS_NAMES: [employee, radon, wine]

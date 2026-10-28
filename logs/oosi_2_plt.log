@@ -1,0 +1,27 @@
+2026-10-28 14:44:05,306 - INFO - Logging established
+2026-10-28 14:44:05,307 - INFO - Logs save at: ../logs/oosi_2_plt.log
+2026-10-28 14:44:05,307 - INFO - Plotting started.
+2026-10-28 14:44:05,348 - INFO - OS: Windows 11
+2026-10-28 14:44:05,348 - INFO - Python Version: 3.13.18
+2026-10-28 14:44:05,349 - INFO - Dependencies save at: ../logs/requirements_oosi_2_plt.txt
+2026-10-28 14:44:05,349 - INFO - Target found: radon__log_radon
+2026-10-28 14:44:05,350 - INFO - Estimator found: gb
+2026-10-28 14:44:05,350 - INFO - Result found: config.pkl
+2026-10-28 14:44:05,351 - INFO - Result found: params.pkl
+2026-10-28 14:44:05,351 - INFO - Result found: total_best_params.pkl
+2026-10-28 14:44:05,352 - INFO - Result found: total_scores.pkl
+2026-10-28 14:44:05,352 - INFO - Result found: total_scores_sh.pkl
+2026-10-28 14:44:05,352 - INFO - Result found: total_shapii.pkl
+2026-10-28 14:44:05,355 - INFO - Result found: total_shapii_sh.pkl
+2026-10-28 14:44:05,357 - INFO - Result found: total_x_tst_sample_shapiq.pkl
+2026-10-28 14:44:05,358 - INFO - Plot optimized parameter distribution.
+2026-10-28 14:44:05,874 - INFO - Plot model fit.
+2026-10-28 14:44:06,148 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-10-28 14:44:06,149 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-10-28 14:44:06,161 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-10-28 14:44:06,163 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-10-28 14:44:06,310 - INFO - Plot average SHAP values.
+2026-10-28 14:44:06,690 - INFO - Plot average SHAP values distribution.
+2026-10-28 14:44:07,161 - INFO - Plot single SHAP values.
+2026-10-28 14:44:07,824 - INFO - Plot single SHAP values dependencies.
+2026-10-28 14:44:12,427 - INFO - Plotting finished.

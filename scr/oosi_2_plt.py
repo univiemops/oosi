@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Out-of-sample inference 2 - Plotting
-v001
+v003
 
 @author: david.steyrl@univie.ac.at
 """
@@ -113,11 +113,11 @@ def plot_parameter_distributions(results: dict, store_path: str) -> None:
         elif name.endswith("extra_trees"):
             ax.set_xlim([-0.05, 1.05])
         elif name.endswith("path_smooth"):
-            ax.set_xlim([0.1, 100])
+            ax.set_xlim([0.1, 1000])
         elif name.endswith("alpha"):
-            ax.set_xlim([0.01, 100])
+            ax.set_xlim([0.001, 100])
         elif name.endswith("C"):
-            ax.set_xlim([0.01, 100])
+            ax.set_xlim([0.001, 100])
         elif name.endswith("l1_ratio"):
             ax.set_xlim([-0.05, 1.05])
         # Make title string
@@ -1157,13 +1157,29 @@ def plot_single_shap_values(results: dict, store_path: str) -> None:
 
         # Get current shap values
         single_shap_values = _get_single_shap_values(results["total_shapii"], c_class)
+        
+        # Normalize single_shap_values so every InteractionValues object has all all_keys
+        normalized_single_shap_values = []
+        for iv in single_shap_values:
+            new_dict_values = {key: iv.dict_values.get(key, 0.0) for key in all_keys}
+            normalized_iv = shapiq.InteractionValues(
+                values=new_dict_values,
+                index=iv.index,
+                max_order=iv.max_order,
+                min_order=iv.min_order,
+                n_players=iv.n_players,
+                baseline_value=iv.baseline_value,
+                estimation_budget=iv.estimation_budget,
+                estimated=iv.estimated,
+            )
+            normalized_single_shap_values.append(normalized_iv)
 
         # Get mean base value
         shapii_base = np.mean([k.baseline_value for k in single_shap_values])
 
         # Plot
         ax = shapiq.plot.beeswarm_plot(
-            single_shap_values,
+            normalized_single_shap_values,
             results["total_x_tst_sample_shapiq"],
             max_display=len(all_keys),
             feature_names=x_names,
@@ -1240,10 +1256,26 @@ def plot_single_shap_values_dependences(results: dict, store_path: str) -> None:
             for item in fold.get(c_class, [])
             for key in item.dict_values.keys()
         }
-        all_keys.remove(())
+        all_keys.discard(())
 
         # Get current shap values
         single_shap_values = _get_single_shap_values(results["total_shapii"], c_class)
+        
+        # Normalize single_shap_values so every InteractionValues object has all all_keys
+        normalized_single_shap_values = []
+        for iv in single_shap_values:
+            new_dict_values = {key: iv.dict_values.get(key, 0.0) for key in all_keys}
+            normalized_iv = shapiq.InteractionValues(
+                values=new_dict_values,
+                index=iv.index,
+                max_order=iv.max_order,
+                min_order=iv.min_order,
+                n_players=iv.n_players,
+                baseline_value=iv.baseline_value,
+                estimation_budget=iv.estimation_budget,
+                estimated=iv.estimated,
+            )
+            normalized_single_shap_values.append(normalized_iv)
 
         # Get mean base value
         shapii_base = np.mean([k.baseline_value for k in single_shap_values])
@@ -1255,7 +1287,7 @@ def plot_single_shap_values_dependences(results: dict, store_path: str) -> None:
 
             # Plot
             ax = shapiq.plot.scatter_plot(
-                single_shap_values,
+                normalized_single_shap_values,
                 results["total_x_tst_sample_shapiq"],
                 interaction=key,
                 x_feature=key[0],

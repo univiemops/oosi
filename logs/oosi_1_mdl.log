@@ -1,0 +1,18 @@
+2026-10-28 14:45:31,178 - INFO - [+] Logging established
+2026-10-28 14:45:31,179 - INFO -  -> Logs save at: ../logs/oosi_1_mdl.log
+2026-10-28 14:45:31,221 - INFO - [+] Document requirements
+2026-10-28 14:45:31,222 - INFO -  -> OS: Windows 11
+2026-10-28 14:45:31,222 - INFO -  -> Python Version: 3.13.18
+2026-10-28 14:45:31,222 - INFO -  -> Dependencies saved at: ../logs/requirements_oosi_1_mdl.txt
+2026-10-28 14:45:31,223 - INFO - [+] Config names loaded: employee, radon, wine
+2026-10-28 14:45:31,223 - INFO -  -> Config file name to load: ../configs/oosi_configs_employee.yaml
+2026-10-28 14:45:31,223 - INFO -  -> Config file name to load: ../configs/oosi_configs_radon.yaml
+2026-10-28 14:45:31,224 - INFO -  -> Config file name to load: ../configs/oosi_configs_wine.yaml
+2026-10-28 14:45:31,514 - INFO -  -> Config and data loaded: ../configs/oosi_configs_employee.yaml
+2026-10-28 14:45:31,577 - INFO -  -> Config and data loaded: ../configs/oosi_configs_radon.yaml
+2026-10-28 14:45:31,609 - INFO -  -> Config and data loaded: ../configs/oosi_configs_wine.yaml
+2026-10-28 14:45:31,609 - INFO - [+] Out-of-Sample-Inference started: employee__attrition
+2026-10-28 14:45:31,610 - INFO -  -> Data sliced for attrition.
+2026-10-28 14:45:31,612 - INFO -  -> Target type: binary | Classes: [0 1] | Total Classes: 2
+2026-10-28 14:45:31,612 - INFO -  -> Out-of-Sample-Inference estimator: linear
+2026-10-28 14:45:31,630 - INFO - [+] Fold 1: employee attrition linear...

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Out-of-sample inference 1 - Modeling
-v010
+v011
 
 @author: david.steyrl@univie.ac.at
 """
@@ -9,6 +9,7 @@ import gc
 import importlib.metadata as im
 import logging
 import math
+import multiprocessing as mp
 import os
 import pickle as pkl
 import platform
@@ -23,7 +24,7 @@ import yaml
 
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, uniform
-from shapiq.explainer import TabularExplainer
+from shapiq.explainer import TabularExplainer, TreeExplainer
 from shapiq.interaction_values import InteractionValues
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
@@ -34,6 +35,7 @@ from sklearn.model_selection import KFold, RandomizedSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, TargetEncoder
 from sklearn.utils import resample, shuffle
+from sklearn.utils.validation import check_is_fitted, validate_data
 from tabicl import TabICLClassifier, TabICLRegressor
 from tabicl.shap import get_shapiq_explainer
 
@@ -54,6 +56,118 @@ os.environ["PYTHONWARNINGS"] = ",".join(env_rules)
 
 for msg in WARNING_MSGS:
     warnings.filterwarnings("ignore", message=f".*{msg}.*")
+
+
+def predict_logits(self, X: np.ndarray) -> np.ndarray:
+    """Predict class logits for test samples.
+
+    Applies the ensemble of TabICL models to make predictions, with each ensemble
+    member providing predictions that are then averaged. The method:
+
+    1. Transforms input data using the fitted encoders
+    2. Applies the ensemble generator to create multiple views
+    3. Forwards each view through the model
+    4. Corrects for class shuffles
+    5. Averages predictions across ensemble members
+
+    Parameters
+    ----------
+    X : array-like of shape (n_samples, n_features)
+        Test samples for prediction.  Columns that are entirely NaN are
+        treated as masked features and excluded from inference.  This is
+        useful for computing SHAP values, where masked features are
+        represented as all-NaN columns.
+
+    Returns
+    -------
+    np.ndarray of shape (n_samples, n_classes)
+        Class logits for each test sample.
+    """
+    check_is_fitted(self)
+    if isinstance(X, np.ndarray) and len(X.shape) == 1:
+        # Reject 1D arrays to maintain sklearn compatibility
+        raise ValueError("The provided input X is one-dimensional. Reshape your data.")
+
+    # Check if prediction is possible
+    has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
+    has_training_data = (
+        hasattr(self, "ensemble_generator_")
+        and getattr(self.ensemble_generator_, "X_", None) is not None
+    )
+    if not has_kv_cache and not has_training_data:
+        raise RuntimeError(
+            "Cannot predict: this estimator was saved without training data and has no KV cache. "
+            "Predictions require either cached KV projections or the original training data. "
+            "Re-fit the estimator or load from a file saved with save_training_data=True or "
+            "save_kv_cache=True."
+        )
+
+    if self.n_jobs is not None:
+        assert self.n_jobs != 0
+        old_n_threads = torch.get_num_threads()
+        n_logical_cores = mp.cpu_count()
+
+        if self.n_jobs > 0:
+            if self.n_jobs > n_logical_cores:
+                warnings.warn(
+                    f"TabICL got n_jobs={self.n_jobs} but there are only {n_logical_cores} logical cores available."
+                    f" Only {n_logical_cores} threads will be used."
+                )
+            n_threads = min(n_logical_cores, self.n_jobs)
+        else:
+            n_threads = max(1, n_logical_cores + 1 + self.n_jobs)
+
+        torch.set_num_threads(n_threads)
+
+    # Preserve DataFrame structure to retain column names and types for correct feature transformation
+    X = validate_data(self, X, reset=False, dtype=None, skip_check_array=True)
+
+    X = self.X_encoder_.transform(X)
+
+    has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
+
+    if has_kv_cache:
+        # Cache exists: forward only test data and use the pre-computed cache for training data
+        test_data = self.ensemble_generator_.transform(X, mode="test")
+        outputs = []
+        for norm_method, (Xs_test,) in test_data.items():
+            kv_cache = self.model_kv_cache_[norm_method]
+            outputs.append(self._batch_forward_with_cache(Xs_test, kv_cache))
+        outputs = np.concatenate(outputs, axis=0)
+    else:
+        data = self.ensemble_generator_.transform(X, mode="both")
+        outputs = []
+        for norm_method, (Xs, ys) in data.items():
+            feature_shuffles = self.ensemble_generator_.feature_shuffles_[norm_method]
+            outputs.append(self._batch_forward(Xs, ys, feature_shuffles))
+        outputs = np.concatenate(outputs, axis=0)
+
+    # Extract class shuffle patterns from ensemble generator
+    class_shuffles = []
+    for shuffles in self.ensemble_generator_.class_shuffles_.values():
+        class_shuffles.extend(shuffles)
+
+    # Determine actual number of ensemble members
+    # May be fewer than requested if dataset has quite limited features and classes
+    n_estimators = len(class_shuffles)
+
+    # Aggregate predictions from all ensemble members, correcting for class shuffles
+    avg = np.zeros_like(outputs[0])
+    for i, c_shuffle in enumerate(class_shuffles):
+        out = outputs[i]
+        avg += out[..., c_shuffle]
+
+    # Calculate ensemble average
+    avg /= n_estimators
+
+    if self.n_jobs is not None:
+        torch.set_num_threads(old_n_threads)
+
+    return avg
+
+
+# Monkey patch TabICLClassifier to support predict_logit
+TabICLClassifier.predict_logits = predict_logits
 
 
 def setup_logging() -> None:
@@ -351,7 +465,7 @@ def get_estimator_pipeline(
                 regressor=regressor, transformer=StandardScaler()
             )
             space = {
-                "predictor__regressor__alpha": loguniform(0.01, 100),
+                "predictor__regressor__alpha": loguniform(0.001, 100),
                 "predictor__regressor__l1_ratio": uniform(0, 1),
             }
         elif target_type in ("binary", "multiclass"):
@@ -359,7 +473,7 @@ def get_estimator_pipeline(
                 class_weight="balanced", solver="saga", max_iter=10000, warm_start=True
             )
             space = {
-                "predictor__C": loguniform(0.01, 100),
+                "predictor__C": loguniform(0.001, 100),
                 "predictor__l1_ratio": uniform(0, 1),
             }
 
@@ -406,7 +520,7 @@ def get_estimator_pipeline(
             space = {
                 "predictor__regressor__colsample_bytree": uniform(0, 1),
                 "predictor__regressor__extra_trees": [True, False],
-                "predictor__regressor__path_smooth": loguniform(0.1, 100),
+                "predictor__regressor__path_smooth": loguniform(0.1, 1000),
             }
         elif target_type in ("binary", "multiclass"):
             predictor = LGBMClassifier(
@@ -418,7 +532,7 @@ def get_estimator_pipeline(
             space = {
                 "predictor__colsample_bytree": uniform(0.1, 0.9),
                 "predictor__extra_trees": [True, False],
-                "predictor__path_smooth": loguniform(0.1, 100),
+                "predictor__path_smooth": loguniform(0.1, 1000),
             }
 
     elif pipe_name == "tabicl":
@@ -661,20 +775,18 @@ def explain_pipeline(
     explanations : dict of {Any: list of shapiq.interaction_values.InteractionValues}
         Mapping of target class indices to lists of InteractionValues for each instance.
     """
-    if pipe_name == "linear" and target_type in ["binary", "multiclass"]:
-        pred_fun = estimator.decision_function
-    elif pipe_name == "gb" and target_type in ["binary", "multiclass"]:
-        pred_fun = estimator.predict_proba
-    else:
-        pred_fun = estimator
-
     n_features = estimator[0].transform(x_tst).shape[1]
 
     explanations = {}
     for c_class in classes:
-        if pipe_name in ["linear", "gb"]:
+        # if pipe_name in ["linear", "gb"]:
+        if pipe_name == "linear":
             explainer = TabularExplainer(
-                model=pred_fun,
+                model=(
+                    estimator.decision_function
+                    if target_type in ["binary", "multiclass"]
+                    else estimator
+                ),
                 data=x_trn,
                 class_index=c_class,
                 imputer="marginal",
@@ -688,8 +800,59 @@ def explain_pipeline(
             explanations[c_class] = explainer.explain_X(
                 x_tst,
                 n_jobs=-2,
-                budget=min(2**n_features, 10*n_features + 10*math.comb(n_features, 2)),
+                budget=min(2**n_features, 10 * (n_features + math.comb(n_features, 2))),
             )
+
+        elif pipe_name == "gb":
+            explainer = TreeExplainer(
+                model=(
+                    estimator[1].regressor_
+                    if target_type == "continuous"
+                    else estimator[1]
+                ),
+                mode="pathdependent",
+                reference_dataset=None,
+                max_order=2,
+                min_order=0,
+                index="k-SII",
+                class_index=c_class,
+                backend="auto",
+            )
+            explanations[c_class] = explainer.explain_X(
+                estimator[0].transform(x_tst),
+                n_jobs=-2,
+                budget=min(2**n_features, 10 * (n_features + math.comb(n_features, 2))),
+            )
+
+            if target_type == "continuous":
+                target_scaler = estimator[1].transformer_
+                target_scale = float(target_scaler.scale_[0])
+                target_mean = float(target_scaler.mean_[0])
+
+                rescaled_explanations = []
+
+                for iv in explanations[c_class]:
+                    rescaled_values = {
+                        subset: value * target_scale
+                        for subset, value in iv.dict_values.items()
+                    }
+
+                    rescaled_explanations.append(
+                        InteractionValues(
+                            values=rescaled_values,
+                            index=iv.index,
+                            max_order=iv.max_order,
+                            min_order=iv.min_order,
+                            n_players=iv.n_players,
+                            baseline_value=(
+                                iv.baseline_value * target_scale + target_mean
+                            ),
+                            estimation_budget=iv.estimation_budget,
+                            estimated=iv.estimated,
+                        )
+                    )
+                explanations[c_class] = rescaled_explanations
+
         elif pipe_name == "tabicl":
             explainer = get_shapiq_explainer(
                 estimator=estimator[1],
@@ -702,10 +865,10 @@ def explain_pipeline(
             explanations[c_class] = explainer.explain_X(
                 estimator[0].transform(x_tst),
                 n_jobs=1,
-                budget=min(2**n_features, 10*n_features + 10*math.comb(n_features, 2)),
+                budget=min(2**n_features, 10 * (n_features + math.comb(n_features, 2))),
             )
 
-    if target_type == "multiclass" and pipe_name == "tabicl":
+    if target_type == "multiclass" and pipe_name in ["gb", "tabicl"]:
         n_cat = len(cat_ind)
         n_features_orig = x_trn.shape[1]
         for class_key in explanations.keys():
@@ -722,7 +885,7 @@ def explain_pipeline(
                 iv_list.append(iv)
             explanations[class_key] = iv_list
 
-    if pipe_name == "tabicl":
+    if pipe_name in ["gb", "tabicl"]:
         for class_key in explanations.keys():
             iv_list = []
             for iv in explanations[class_key]:
