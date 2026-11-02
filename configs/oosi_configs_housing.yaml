@@ -67,5 +67,5 @@ SPLITTER_PARAMS:
     random_state: 3141592
 
 # Define the list of active pipeline configurations to execute sequentially.
-# Each entry contains a label name and its respective pipeline instantiator function.
-PIPELINE_CONFIGS: ["linear", "gb", "tabicl"]
+# Valid options: list of "linear", "gb", "tabicl", "tabpfn"
+PIPELINE_CONFIGS: ["linear", "gb", "tabicl", "tabpfn"]

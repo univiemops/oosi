@@ -1,3 +1,4 @@
+annotated-types==0.8.0
 anyio==4.15.1
 asttokens==3.0.2
 certifi==2026.10.23
@@ -53,12 +54,18 @@ platformdirs==4.13.7
 prompt_toolkit==3.0.53
 psutil==7.2.2
 pure_eval==0.2.4
+pydantic==2.14.2
+pydantic_core==2.50.2
+pydantic-settings==2.16.2
+pydot==4.0.1
 Pygments==2.21.0
 pyparsing==3.3.3
 python-dateutil==3.0.0
+python-dotenv==1.2.4
 PyYAML==6.0.3
 pyzmq==27.2.0
 requests==2.34.2
+safetensors==0.8.0
 scikit-learn==1.9.1
 scipy==1.18.1
 seaborn==0.13.2
@@ -66,11 +73,13 @@ setuptools==84.2.1
 shap==0.54.1
 shapiq==1.8.0
 six==1.17.0
+skrub==0.10.1
 slicer==0.0.8
 spyder-kernels==3.1.6
 stack-data==0.6.3
 sympy==1.14.0
 tabicl==2.2.0
+tabpfn==9.2.0
 threadpoolctl==3.7.0
 torch==2.14.1+cu132
 tornado==6.6
@@ -78,6 +87,7 @@ tqdm==4.70.1
 traitlets==5.16.1
 truststore==0.10.5
 typing_extensions==4.16.0
+typing-inspection==0.4.4
 tzdata==2026.6
 urllib3==2.8.0
 wcwidth==0.9.4

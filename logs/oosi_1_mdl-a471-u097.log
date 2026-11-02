@@ -1,0 +1,17 @@
+2026-10-30 12:43:09,225 - INFO - [+] Logging established
+2026-10-30 12:43:09,227 - INFO -  -> Logs save at: ../logs/oosi_1_mdl.log
+2026-10-30 12:43:12,419 - INFO - [+] Document requirements
+2026-10-30 12:43:12,420 - INFO -  -> OS: Windows 11
+2026-10-30 12:43:12,420 - INFO -  -> Python Version: 3.13.18
+2026-10-30 12:43:12,421 - INFO -  -> Dependencies saved at: ../logs/requirements_oosi_1_mdl.txt
+2026-10-30 12:43:12,437 - INFO - [+] Config names loaded: employee
+2026-10-30 12:43:12,438 - INFO -  -> Config file name to load: ../configs/oosi_configs_employee.yaml
+2026-10-30 12:43:14,940 - INFO -  -> Config and data loaded: ../configs/oosi_configs_employee.yaml
+2026-10-30 12:43:14,941 - INFO - [+] Out-of-Sample-Inference started: employee__attrition
+2026-10-30 12:43:14,943 - INFO -  -> Data sliced for attrition.
+2026-10-30 12:43:14,946 - INFO -  -> Target type: binary | Classes: [0 1] | Total Classes: 2
+2026-10-30 12:43:14,947 - INFO -  -> Out-of-Sample-Inference estimator: tabpfn
+2026-10-30 12:43:14,991 - INFO - [+] Fold 1: employee attrition tabpfn...
+2026-10-30 12:43:20,472 - INFO -  -> trn downsampled to 100 samples for shapiq
+2026-10-30 12:43:20,475 - INFO -  -> tst downsampled to 10 samples for shapiq
+2026-10-30 12:43:20,751 - INFO -  --> Avg Balanced Accuracy: 75.54
