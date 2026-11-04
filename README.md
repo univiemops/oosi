@@ -8,11 +8,11 @@ How to install python developer environment for oosi via uv on Windows
 (3)  With Powershell uv install python: 	uv python install 3.13  
 (4)  With Powershell uv create venv: 		uv venv venv-spyder  
 (5)  With Powershell activate venv: 		venv-spyder\Scripts\activate  
-(6)  With Powershell uv install packages: 	uv pip install causilo ipywidgets lightgbm shapiq spyder tabicl tabpfn  
+(6)  With Powershell uv install packages: 	uv pip install ipywidgets lightgbm shapiq spyder tabicl tabpfn  
 (7)  With Powershell run Spyder: 			spyder  
 (8)  With Powershell uv create venv: 		uv venv venv-oosi  
 (9)  With Powershell activate venv: 		venv-oosi\Scripts\activate  
-(10) With Powershell uv install packages: 	uv pip install causilo ipywidgets lightgbm openpyxl pyyaml seaborn shapiq spyder-kernels tabicl tabpfn  
+(10) With Powershell uv install packages: 	uv pip install ipywidgets lightgbm openpyxl pyyaml seaborn shapiq spyder-kernels tabicl tabpfn  
 (11) Optional if nvidia: 					uv pip install torch --index-url https://download.pytorch.org/whl/cu134 --upgrade  
 (12) Optional if amd[gfx1012]: 				uv pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "torch[device-gfx1012]==2.14.0+rocm10.1.0" "rocm[libraries,devel,device-gfx1012]==10.1.0" --upgrade
 (13) In Spyder->Tools->Preferences->Python interpreter->Select interpreter navigate to venv-oosi/Scripts and select python.exe  

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Out-of-sample inference 1 - Modeling
-v012
+v013
 
 @author: david.steyrl@univie.ac.at
 """
@@ -22,11 +22,9 @@ import pandas as pd
 import torch
 import yaml
 
-from causilo import CausiloClassifier, CausiloRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, uniform
 from shapiq.explainer import TabularExplainer
-from shapiq.interaction_values import InteractionValues
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.impute import SimpleImputer
@@ -59,8 +57,8 @@ for msg in WARNING_MSGS:
     warnings.filterwarnings("ignore", message=f".*{msg}.*")
 
 
-def predict_logits(self, X: np.ndarray, centering: str = "mean") -> np.ndarray:
-    """Predict class logits for test samples with optional logit centering.
+def predict_logits(self, X: np.ndarray) -> np.ndarray:
+    """Predict class logits for test samples.
 
     Applies the ensemble of TabICL models to make predictions, with each ensemble
     member providing predictions that are then averaged. The method:
@@ -78,13 +76,6 @@ def predict_logits(self, X: np.ndarray, centering: str = "mean") -> np.ndarray:
         treated as masked features and excluded from inference.  This is
         useful for computing SHAP values, where masked features are
         represented as all-NaN columns.
-    centering : str or None, default="mean"
-        Method to center logits to align baseline values with sklearn/LightGBM:
-        - "mean": Subtracts the per-sample mean across classes (zero-sum centering).
-                  Brings baseline values down near 0.
-        - "binary_diff": For binary classification, computes the direct log-odds
-                         difference (logit_class1 - logit_class0) returning 1D.
-        - None: Returns raw uncentered transformer logits.
 
     Returns
     -------
@@ -168,29 +159,15 @@ def predict_logits(self, X: np.ndarray, centering: str = "mean") -> np.ndarray:
     # Calculate ensemble average
     avg /= n_estimators
 
-    # # Logit Centering Functionality
-    # if centering == "mean":
-    #     # Zero-center logits across classes for each sample (removes global transformer shift)
-    #     avg = avg - np.mean(avg, axis=-1, keepdims=True)
-    # elif centering == "binary_diff" and avg.shape[-1] == 2:
-    #     # For binary classification, output standard log-odds: logit(class 1) - logit(class 0)
-    #     avg = avg[..., 1] - avg[..., 0]
-    # elif centering is not None:
-    #     raise ValueError(f"Unknown centering method: {centering}")
-
     if self.n_jobs is not None:
         torch.set_num_threads(old_n_threads)
 
     return avg
 
 
-# Monkey patch TabICLClassifier to support predict_logit
-TabICLClassifier.decision_function = predict_logits
-
 def decision_func(self, X):
     return self.predict_logits(X)
 
-TabPFNClassifier.decision_function=decision_func
 
 def setup_logging() -> None:
     """Set up the logging environment.
@@ -382,29 +359,10 @@ def get_preprocessor(
     preprocessor : sklearn.compose.ColumnTransformer
         Configured preprocessor applying target-specific transformations.
     """
-    if pipe_name == "linear":
-        cont = Pipeline(
-            [
-                ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", StandardScaler()),
-            ]
-        )
-        binary = Pipeline(
-            [
-                ("imputer", SimpleImputer(strategy="most_frequent")),
-                ("scaler", StandardScaler()),
-            ]
-        )
-        cat = Pipeline(
-            [
-                ("onehot", OneHotEncoder(sparse_output=False, handle_unknown="ignore")),
-                ("scaler", StandardScaler()),
-            ]
-        )
-    elif pipe_name == "gb":
-        cont = Pipeline([("scaler", StandardScaler())])
+    if pipe_name == "gb":
+        continous = Pipeline([("scaler", StandardScaler())])
         binary = Pipeline([("scaler", StandardScaler())])
-        cat = Pipeline(
+        categorical = Pipeline(
             [
                 (
                     "target",
@@ -422,10 +380,29 @@ def get_preprocessor(
                 ("scaler", StandardScaler()),
             ]
         )
+    elif pipe_name == "linear":
+        continous = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+            ]
+        )
+        binary = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="most_frequent")),
+                ("scaler", StandardScaler()),
+            ]
+        )
+        categorical = Pipeline(
+            [
+                ("onehot", OneHotEncoder(sparse_output=False, handle_unknown="ignore")),
+                ("scaler", StandardScaler()),
+            ]
+        )
     elif pipe_name == "tabicl":
-        cont = Pipeline([("passthrough", "passthrough")])
+        continous = Pipeline([("passthrough", "passthrough")])
         binary = Pipeline([("passthrough", "passthrough")])
-        cat = Pipeline(
+        categorical = Pipeline(
             [
                 (
                     "target",
@@ -443,15 +420,15 @@ def get_preprocessor(
             ]
         )
     elif pipe_name == "tabpfn":
-        cont = Pipeline([("passthrough", "passthrough")])
+        continous = Pipeline([("passthrough", "passthrough")])
         binary = Pipeline([("passthrough", "passthrough")])
-        cat = Pipeline([("passthrough", "passthrough")])
+        categorical = Pipeline([("passthrough", "passthrough")])
 
     return ColumnTransformer(
         [
-            ("cont", cont, config["X_CONTINUOUS_IND"]),
+            ("con", continous, config["X_CONTINUOUS_IND"]),
             ("bin", binary, config["X_BINARY_IND"]),
-            ("cat", cat, config["X_MULTICAT_IND"]),
+            ("cat", categorical, config["X_MULTICAT_IND"]),
         ]
     )
 
@@ -484,26 +461,7 @@ def get_estimator_pipeline(
     preprocessor = get_preprocessor(config, target_type, pipe_name=pipe_name)
     scorer = "r2" if target_type == "continuous" else "balanced_accuracy"
 
-    if pipe_name == "linear":
-        if target_type == "continuous":
-            regressor = ElasticNet(max_iter=10000, warm_start=True, selection="random")
-            predictor = TransformedTargetRegressor(
-                regressor=regressor, transformer=StandardScaler()
-            )
-            space = {
-                "predictor__regressor__alpha": loguniform(0.001, 100),
-                "predictor__regressor__l1_ratio": uniform(0, 1),
-            }
-        elif target_type in ["binary", "multiclass"]:
-            predictor = LogisticRegression(
-                class_weight="balanced", solver="saga", max_iter=10000, warm_start=True
-            )
-            space = {
-                "predictor__C": loguniform(0.001, 100),
-                "predictor__l1_ratio": uniform(0, 1),
-            }
-
-    elif pipe_name == "gb":
+    if pipe_name == "gb":
         lgbm_params = {
             "boosting_type": "gbdt",
             "num_leaves": 100,
@@ -535,7 +493,6 @@ def get_estimator_pipeline(
             "min_data_in_leaf": 2,
             "verbosity": -1,
         }
-
         if target_type == "continuous":
             regressor = LGBMRegressor(
                 objective="mean_squared_error", **lgbm_params, **extra_params
@@ -561,6 +518,25 @@ def get_estimator_pipeline(
                 "predictor__path_smooth": loguniform(0.1, 1000),
             }
 
+    if pipe_name == "linear":
+        if target_type == "continuous":
+            regressor = ElasticNet(max_iter=10000, warm_start=True, selection="random")
+            predictor = TransformedTargetRegressor(
+                regressor=regressor, transformer=StandardScaler()
+            )
+            space = {
+                "predictor__regressor__alpha": loguniform(0.001, 100),
+                "predictor__regressor__l1_ratio": uniform(0, 1),
+            }
+        elif target_type in ["binary", "multiclass"]:
+            predictor = LogisticRegression(
+                class_weight="balanced", solver="saga", max_iter=10000, warm_start=True
+            )
+            space = {
+                "predictor__C": loguniform(0.001, 100),
+                "predictor__l1_ratio": uniform(0, 1),
+            }
+
     elif pipe_name == "tabicl":
         space = {}
         if target_type == "continuous":
@@ -572,6 +548,8 @@ def get_estimator_pipeline(
                 random_state=None,
             )
         elif target_type in ["binary", "multiclass"]:
+            # Monkey patch TabICLClassifier to support decision_function
+            TabICLClassifier.decision_function = predict_logits
             predictor = TabICLClassifier(
                 n_estimators=10,
                 batch_size=None,
@@ -594,10 +572,15 @@ def get_estimator_pipeline(
                 random_state=None,
             )
         elif target_type in ["binary", "multiclass"]:
+            # Monkey patch TabPFNClassifier to support decision_function
+            TabPFNClassifier.decision_function = decision_func
             predictor = TabPFNClassifier(
                 n_estimators=10,
                 categorical_features_indices=list(
-                    range(len(config["X_CONTINUOUS_IND"]), len(config["X_NAMES"]))
+                    range(
+                        len(config["X_CONTINUOUS_IND"]) + len(config["X_BINARY_IND"]),
+                        len(config["X_NAMES"]),
+                    )
                 ),
                 balance_probabilities=True,
                 average_before_softmax=True,
@@ -683,124 +666,13 @@ def get_estimator_scores(
     }
 
 
-def group_features(
-    iv: InteractionValues, features_to_group: list[int] or set[int], new_feature_id: int
-) -> InteractionValues:
-    """Group subset indices within a SHAP interaction values object into a unified index.
-
-    Parameters
-    ----------
-    iv : shapiq.interaction_values.InteractionValues
-        Original InteractionValues instance.
-    features_to_group : list of int or set of int
-        Indices of features to combine into a single index entity.
-    new_feature_id : int
-        New integer index assigned to the grouped feature set.
-
-    Returns
-    -------
-    grouped_iv : shapiq.interaction_values.InteractionValues
-        New InteractionValues object with aggregated interaction features.
-    """
-    group = set(features_to_group)
-    new_values = {}
-
-    for subset, value in iv.dict_values.items():
-        subset_set = set(subset)
-        intersection = subset_set.intersection(group)
-
-        if len(intersection) == 0:
-            new_values[subset] = new_values.get(subset, 0.0) + value
-        else:
-            outside_elements = subset_set.difference(group)
-            new_subset = tuple(sorted(list(outside_elements) + [new_feature_id]))
-            new_values[new_subset] = new_values.get(new_subset, 0.0) + value
-
-    baseline_val = iv.baseline_value
-    new_n_players = iv.n_players - len(group) + 1
-    new_min_order = (
-        min(len(k) for k in new_values.keys()) if new_values else iv.min_order
-    )
-
-    return InteractionValues(
-        values=new_values,
-        index=iv.index,
-        max_order=iv.max_order,
-        min_order=new_min_order,
-        n_players=new_n_players,
-        baseline_value=baseline_val,
-        estimation_budget=iv.estimation_budget,
-    )
-
-
-def reorder_interaction_values(
-    iv: InteractionValues, indices: list[int]
-) -> InteractionValues:
-    """Remap target indices within an InteractionValues instance according to a sequence map.
-
-    Parameters
-    ----------
-    iv : shapiq.interaction_values.InteractionValues
-        Original interaction values structure to reorder.
-    indices : list of int
-        Mapping list where index positions define new player indices.
-
-    Returns
-    -------
-    reordered_iv : shapiq.interaction_values.InteractionValues
-        InteractionValues instance with remapped player feature indices.
-
-    Raises
-    ------
-    ValueError
-        If length of provided indices list is smaller than total number of players.
-    IndexError
-        If an index present inside interaction subset is out of bounds for target mapping.
-    """
-    new_values = {}
-    n_players_current = iv.n_players
-
-    if len(indices) < n_players_current:
-        raise ValueError(
-            f"The length of the indices list ({len(indices)}) must be at least "
-            f"the number of players in the InteractionValues object ({n_players_current})."
-        )
-
-    for subset, value in iv.dict_values.items():
-        try:
-            new_subset = tuple(sorted(indices[p] for p in subset))
-        except IndexError as e:
-            raise IndexError(
-                f"Player index in subset {subset} is out of bounds for the provided indices list."
-            ) from e
-        new_values[new_subset] = value
-
-    baseline_val = getattr(iv, "baseline_value", 0.0)
-    est_budget = getattr(iv, "estimation_budget", None)
-    is_estimated = getattr(iv, "estimated", False)
-
-    return InteractionValues(
-        values=new_values,
-        index=iv.index,
-        max_order=iv.max_order,
-        min_order=iv.min_order,
-        n_players=len(indices),
-        baseline_value=baseline_val,
-        estimation_budget=est_budget,
-        estimated=is_estimated,
-    )
-
-
 def explain_pipeline(
     estimator: Pipeline,
     x_trn: np.ndarray,
-    y_trn: np.ndarray,
     x_tst: np.ndarray,
     pipe_name: str,
     target_type: str,
     classes: list[Any] = None,
-    cat_ind: list[Any] = None,
-    x_names_sequence: list[Any] = None,
 ) -> dict[Any, Any]:
     """Compute feature interaction explanations using SHAPIQ for model evaluation pipelines.
 
@@ -810,8 +682,6 @@ def explain_pipeline(
         Fitted model pipeline to explain.
     x_trn : numpy.ndarray of shape (n_samples_train, n_features)
         Training dataset sample used for background baseline.
-    y_trn : numpy.ndarray of shape (n_samples_train, n_labels)
-        Training dataset sample used for background baseline.
     x_tst : numpy.ndarray of shape (n_samples_test, n_features)
         Test dataset sample to explain.
     pipe_name : {'linear', 'gb', 'tabicl'}
@@ -820,10 +690,6 @@ def explain_pipeline(
         Data type of the target variable.
     classes : list of Any, default=None
         List of target class indices to calculate explanations for.
-    cat_ind : list of Any, default=None
-        Indices of categorical features requiring re-grouping post-transformation.
-    x_names_sequence : list of Any, default=None
-        Full feature index sequence used for ordering interaction values.
 
     Returns
     -------
@@ -835,132 +701,28 @@ def explain_pipeline(
     explanations = {}
     for c_class in classes:
         if target_type in ["binary", "multiclass"]:
-            to_explain=estimator.decision_function
+            to_explain = estimator.decision_function
         else:
-            to_explain=estimator
+            to_explain = estimator
 
-        if pipe_name in ["linear", "gb", "tabicl", "tabpfn"]:
-            explainer = TabularExplainer(
-                model=to_explain,
-                data=x_trn,
-                class_index=c_class,
-                imputer="marginal",
-                approximator="auto",
-                index="k-SII",
-                max_order=2,
-                random_state=None,
-                verbose=False,
-                sample_size=None,
-            )
-            explanations[c_class] = explainer.explain_X(
-                x_tst,
-                n_jobs=-1 if pipe_name in ["linear", "gb"] else 1,
-                budget=min(2**n_features, 2*(n_features + math.comb(n_features, 2))),
-            )
+        explainer = TabularExplainer(
+            model=to_explain,
+            data=x_trn,
+            class_index=c_class,
+            imputer="marginal",
+            approximator="auto",
+            index="k-SII",
+            max_order=2,
+            random_state=None,
+            verbose=False,
+            sample_size=None,
+        )
 
-    #     elif pipe_name == "gb":
-    #         explainer = TreeExplainer(
-    #             model=(
-    #                 estimator[1].regressor_
-    #                 if target_type == "continuous"
-    #                 else estimator[1]
-    #             ),
-    #             mode="pathdependent",
-    #             reference_dataset=None,
-    #             max_order=2,
-    #             min_order=0,
-    #             index="k-SII",
-    #             class_index=c_class,
-    #             backend="auto",
-    #         )
-    #         explanations[c_class] = explainer.explain_X(
-    #             estimator[0].transform(x_tst),
-    #             n_jobs=-2,
-    #             budget=min(2**n_features, 10 * (n_features + math.comb(n_features, 2))),
-    #         )
-
-    #         if target_type == "continuous":
-    #             target_scaler = estimator[1].transformer_
-    #             target_scale = float(target_scaler.scale_[0])
-    #             target_mean = float(target_scaler.mean_[0])
-
-    #             rescaled_explanations = []
-
-    #             for iv in explanations[c_class]:
-    #                 rescaled_values = {
-    #                     subset: value * target_scale
-    #                     for subset, value in iv.dict_values.items()
-    #                 }
-
-    #                 rescaled_explanations.append(
-    #                     InteractionValues(
-    #                         values=rescaled_values,
-    #                         index=iv.index,
-    #                         max_order=iv.max_order,
-    #                         min_order=iv.min_order,
-    #                         n_players=iv.n_players,
-    #                         baseline_value=(
-    #                             iv.baseline_value * target_scale + target_mean
-    #                         ),
-    #                         estimation_budget=iv.estimation_budget,
-    #                         estimated=iv.estimated,
-    #                     )
-    #                 )
-    #             explanations[c_class] = rescaled_explanations
-
-    #     elif pipe_name == "tabicl":
-    #         explainer = get_shapiq_explainer(
-    #             estimator=estimator[1],
-    #             data=estimator[0].transform(x_trn),
-    #             imputer="nan",
-    #             index="k-SII",
-    #             max_order=2,
-    #             class_index=c_class,
-    #         )
-    #         explanations[c_class] = explainer.explain_X(
-    #             estimator[0].transform(x_tst),
-    #             n_jobs=1,
-    #             budget=min(2**n_features, 10 * (n_features + math.comb(n_features, 2))),
-    #         )
-
-    #     elif pipe_name == "tabpfn":
-    #         explainer = TabPFNExplainer(
-    #             model=estimator[1],
-    #             data=estimator[0].transform(x_trn),
-    #             labels=y_trn,
-    #             index="k-SII",
-    #             max_order=2,
-    #             class_index=c_class,
-    #         )
-    #         explanations[c_class] = explainer.explain_X(
-    #             estimator[0].transform(x_tst),
-    #             n_jobs=1,
-    #             budget=min(2**n_features, n_features + math.comb(n_features, 2)),
-    #         )
-
-    # if target_type == "multiclass" and pipe_name in ["gb", "tabicl"]:
-    #     n_cat = len(cat_ind)
-    #     n_features_orig = x_trn.shape[1]
-    #     for class_key in explanations.keys():
-    #         iv_list = []
-    #         for iv in explanations[class_key]:
-    #             for num, _ in enumerate(cat_ind):
-    #                 start_ind = n_features - ((n_cat - num) * len(classes))
-    #                 end_ind = start_ind + len(classes)
-    #                 group_ind = list(range(start_ind, end_ind))
-    #                 new_ind = n_features_orig - (n_cat - num)
-    #                 iv = group_features(
-    #                     iv=iv, features_to_group=group_ind, new_feature_id=new_ind
-    #                 )
-    #             iv_list.append(iv)
-    #         explanations[class_key] = iv_list
-
-    # if pipe_name in ["gb", "tabicl", "tabpfn"]:
-    #     for class_key in explanations.keys():
-    #         iv_list = []
-    #         for iv in explanations[class_key]:
-    #             iv_list.append(reorder_interaction_values(iv, x_names_sequence))
-    #         explanations[class_key] = iv_list
+        explanations[c_class] = explainer.explain_X(
+            x_tst,
+            n_jobs=-1 if pipe_name in ["linear", "gb"] else 1,
+            budget=min(2**n_features, 2 * (n_features + math.comb(n_features, 2))),
+        )
 
     return explanations
 
@@ -1128,7 +890,7 @@ def main() -> None:
                     }
 
                     x_trn_sample, y_trn_sample = downsample_if_needed(
-                        x=x_trn, y=y_trn, target_size=100, label="trn"
+                        x=x_trn, y=y_trn, target_size=120, label="trn"
                     )
                     x_tst_sample, y_tst_sample = downsample_if_needed(
                         x=x_tst, y=y_tst, target_size=40, label="tst"
@@ -1145,15 +907,10 @@ def main() -> None:
                         shap_data = explain_pipeline(
                             estimator=mdl,
                             x_trn=x_trn_sample,
-                            y_trn=y_trn_sample,
                             x_tst=x_tst_sample,
                             pipe_name=pipe_name,
                             target_type=target_type,
                             classes=classes,
-                            cat_ind=config["X_MULTICAT_IND"],
-                            x_names_sequence=config["X_CONTINUOUS_IND"]
-                            + config["X_BINARY_IND"]
-                            + config["X_MULTICAT_IND"],
                         )
                         tracking[suffix][1].append(shap_data)
 

@@ -1417,11 +1417,11 @@ def main() -> None:
             logging.info("Plot single SHAP values.")
             plot_single_shap_values(results, f"../plots/{target_path}/{estimator_path}")
 
-            # # Plot single SHAP values dependencies
-            # logging.info("Plot single SHAP values dependencies.")
-            # plot_single_shap_values_dependences(
-            #     results, f"../plots/{target_path}/{estimator_path}"
-            # )
+            # Plot single SHAP values dependencies
+            logging.info("Plot single SHAP values dependencies.")
+            plot_single_shap_values_dependences(
+                results, f"../plots/{target_path}/{estimator_path}"
+            )
 
     logging.info("Plotting finished.")
 
