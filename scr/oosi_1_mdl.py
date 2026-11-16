@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
 """Out-of-sample inference 1 - Modeling
-v013
+v015
 
 @author: david.steyrl@univie.ac.at
 """
 
+from __future__ import annotations
+
 import gc
-import importlib.metadata as im
+import importlib.metadata as metadata
 import logging
-import math
 import multiprocessing as mp
 import os
 import pickle as pkl
 import platform
 import time
 import warnings
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -22,6 +24,8 @@ import pandas as pd
 import torch
 import yaml
 
+from causilo import CausiloClassifier, CausiloRegressor
+from custom_splitter import ExtendedGroupShuffleSplit, RepeatedGroupKFold
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, uniform
 from shapiq.explainer import TabularExplainer
@@ -38,7 +42,14 @@ from sklearn.utils.validation import check_is_fitted, validate_data
 from tabicl import TabICLClassifier, TabICLRegressor
 from tabpfn import TabPFNClassifier, TabPFNRegressor
 
-from custom_splitter import RepeatedGroupKFold, ExtendedGroupShuffleSplit
+# Project paths relative to the working directory
+LOG_DIR = Path("../logs")
+CONFIG_DIR = Path("../configs")
+RESULTS_DIR = Path("../results")
+MODELS_DIR = Path("../models")
+CONFIG_NAMES_PATH = CONFIG_DIR / "oosi_configs_names.yaml"
+
+RANDOM_STATE = 3141592
 
 # Suppress warnings that clog stdout/stderr during rapid solver iterations
 WARNING_MSGS = [
@@ -57,7 +68,7 @@ for msg in WARNING_MSGS:
     warnings.filterwarnings("ignore", message=f".*{msg}.*")
 
 
-def predict_logits(self, X: np.ndarray) -> np.ndarray:
+def tabicl_predict_logits(self, X: np.ndarray) -> np.ndarray:
     """Predict class logits for test samples.
 
     Applies the ensemble of TabICL models to make predictions, with each ensemble
@@ -72,8 +83,8 @@ def predict_logits(self, X: np.ndarray) -> np.ndarray:
     Parameters
     ----------
     X : array-like of shape (n_samples, n_features)
-        Test samples for prediction.  Columns that are entirely NaN are
-        treated as masked features and excluded from inference.  This is
+        Test samples for prediction. Columns that are entirely NaN are
+        treated as masked features and excluded from inference. This is
         useful for computing SHAP values, where masked features are
         represented as all-NaN columns.
 
@@ -84,10 +95,8 @@ def predict_logits(self, X: np.ndarray) -> np.ndarray:
     """
     check_is_fitted(self)
     if isinstance(X, np.ndarray) and len(X.shape) == 1:
-        # Reject 1D arrays to maintain sklearn compatibility
         raise ValueError("The provided input X is one-dimensional. Reshape your data.")
 
-    # Check if prediction is possible
     has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
     has_training_data = (
         hasattr(self, "ensemble_generator_")
@@ -109,8 +118,8 @@ def predict_logits(self, X: np.ndarray) -> np.ndarray:
         if self.n_jobs > 0:
             if self.n_jobs > n_logical_cores:
                 warnings.warn(
-                    f"TabICL got n_jobs={self.n_jobs} but there are only {n_logical_cores} logical cores available."
-                    f" Only {n_logical_cores} threads will be used."
+                    f"TabICL got n_jobs={self.n_jobs} but there are only {n_logical_cores} logical cores available. "
+                    f"Only {n_logical_cores} threads will be used."
                 )
             n_threads = min(n_logical_cores, self.n_jobs)
         else:
@@ -118,15 +127,12 @@ def predict_logits(self, X: np.ndarray) -> np.ndarray:
 
         torch.set_num_threads(n_threads)
 
-    # Preserve DataFrame structure to retain column names and types for correct feature transformation
     X = validate_data(self, X, reset=False, dtype=None, skip_check_array=True)
-
     X = self.X_encoder_.transform(X)
 
     has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
 
     if has_kv_cache:
-        # Cache exists: forward only test data and use the pre-computed cache for training data
         test_data = self.ensemble_generator_.transform(X, mode="test")
         outputs = []
         for norm_method, (Xs_test,) in test_data.items():
@@ -141,22 +147,17 @@ def predict_logits(self, X: np.ndarray) -> np.ndarray:
             outputs.append(self._batch_forward(Xs, ys, feature_shuffles))
         outputs = np.concatenate(outputs, axis=0)
 
-    # Extract class shuffle patterns from ensemble generator
     class_shuffles = []
     for shuffles in self.ensemble_generator_.class_shuffles_.values():
         class_shuffles.extend(shuffles)
 
-    # Determine actual number of ensemble members
-    # May be fewer than requested if dataset has quite limited features and classes
     n_estimators = len(class_shuffles)
 
-    # Aggregate predictions from all ensemble members, correcting for class shuffles
     avg = np.zeros_like(outputs[0])
     for i, c_shuffle in enumerate(class_shuffles):
         out = outputs[i]
         avg += out[..., c_shuffle]
 
-    # Calculate ensemble average
     avg /= n_estimators
 
     if self.n_jobs is not None:
@@ -165,7 +166,19 @@ def predict_logits(self, X: np.ndarray) -> np.ndarray:
     return avg
 
 
-def decision_func(self, X):
+def decision_func(self: Any, X: np.ndarray) -> np.ndarray:
+    """Compute decision function outputs for the estimator.
+
+    Parameters
+    ----------
+    X : array-like of shape (n_samples, n_features)
+        Input samples.
+
+    Returns
+    -------
+    np.ndarray
+        Predicted logits or decision function outputs.
+    """
     return self.predict_logits(X)
 
 
@@ -179,9 +192,8 @@ def setup_logging() -> None:
     -------
     None
     """
-    log_dir = "../logs"
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = f"{log_dir}/oosi_1_mdl.log"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LOG_DIR / "oosi_1_mdl.log"
     logging.basicConfig(
         filename=log_file,
         filemode="w",
@@ -210,11 +222,15 @@ def document_requirements() -> None:
     -------
     None
     """
-    lines = [f"{dist.name}=={dist.version}" for dist in im.distributions()]
-    req_file = "../logs/requirements_oosi_1_mdl.txt"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    req_file = LOG_DIR / "requirements_oosi_1_mdl.txt"
 
-    with open(req_file, "w", encoding="utf-8") as file:
-        file.write("\n".join(lines) + "\n")
+    requirements = sorted(
+        f"{dist.metadata['Name']}=={dist.version}"
+        for dist in metadata.distributions()
+        if dist.metadata.get("Name")
+    )
+    req_file.write_text("\n".join(requirements) + "\n", encoding="utf-8")
 
     logging.info("[+] Document requirements")
     logging.info(f" -> OS: {platform.system()} {platform.release()}")
@@ -222,27 +238,27 @@ def document_requirements() -> None:
     logging.info(f" -> Dependencies saved at: {req_file}")
 
 
-def get_configs_names(file_path: str) -> list[str]:
+def get_configs_names(file_path: str | Path) -> list[str]:
     """Load configuration names from a YAML file.
 
     Parameters
     ----------
-    file_path : str
+    file_path : str or pathlib.Path
         Path to the YAML file containing the 'CONFIGS_NAMES' key.
 
     Returns
     -------
-    configs_names : list of str
+    list of str
         List of configuration names retrieved from the file.
     """
-    with open(file_path, "r", encoding="utf-8") as file:
+    with Path(file_path).open("r", encoding="utf-8") as file:
         configs_names = yaml.safe_load(file)["CONFIGS_NAMES"]
 
     logging.info(f"[+] Config names loaded: {', '.join(configs_names)}")
     return configs_names
 
 
-def get_configs_file_names(configs_names: list[str]) -> list[str]:
+def get_configs_file_names(configs_names: list[str]) -> list[Path]:
     """Construct file paths for the configuration files based on config names.
 
     Parameters
@@ -252,18 +268,16 @@ def get_configs_file_names(configs_names: list[str]) -> list[str]:
 
     Returns
     -------
-    config_file_names : list of str
+    list of pathlib.Path
         List of constructed YAML configuration file paths.
     """
-    config_file_names = [
-        f"../configs/oosi_configs_{name}.yaml" for name in configs_names
-    ]
-    for name in config_file_names:
-        logging.info(f" -> Config file name to load: {name}")
-    return config_file_names
+    config_file_paths = [CONFIG_DIR / f"oosi_configs_{name}.yaml" for name in configs_names]
+    for path in config_file_paths:
+        logging.info(f" -> Config file name to load: {path}")
+    return config_file_paths
 
 
-def get_configs(configs_file_names: list[str]) -> list[dict[str, Any]]:
+def get_configs(configs_file_names: list[str | Path]) -> list[dict[str, Any]]:
     """Load configuration details and datasets specified in YAML files.
 
     Reads configuration parameters from each path, loads data from the
@@ -272,19 +286,19 @@ def get_configs(configs_file_names: list[str]) -> list[dict[str, Any]]:
 
     Parameters
     ----------
-    configs_file_names : list of str
+    configs_file_names : list of str or pathlib.Path
         List of file paths to configuration files.
 
     Returns
     -------
-    configs : list of dict of {str: typing.Any}
+    list of dict of {str: typing.Any}
         List of loaded configuration dictionaries updated with DataFrame objects.
     """
     configs = []
     dtypes = {"G": np.int64, "X": np.float64, "Y": np.float64}
 
-    for file_name in configs_file_names:
-        with open(file_name, "r", encoding="utf-8") as file:
+    for file_path in configs_file_names:
+        with Path(file_path).open("r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
 
         for key, col_key in [("G", "G_NAME"), ("X", "X_NAMES"), ("Y", "Y_NAMES")]:
@@ -298,7 +312,7 @@ def get_configs(configs_file_names: list[str]) -> list[dict[str, Any]]:
             config[key] = df.reindex(cols, axis=1)
 
         configs.append(config)
-        logging.info(f" -> Config and data loaded: {file_name}")
+        logging.info(f" -> Config and data loaded: {file_path}")
 
     return configs
 
@@ -351,7 +365,7 @@ def get_preprocessor(
         'X_BINARY_IND', 'X_MULTICAT_IND').
     target_type : {'continuous', 'binary', 'multiclass'}
         The data type of the target variable, controlling target encoder behavior.
-    pipe_name : {'linear', 'gb', 'tabicl'}
+    pipe_name : {'linear', 'gb', 'tabicl', 'tabpfn', 'causilo'}
         Identifier for the modeling pipeline architecture.
 
     Returns
@@ -359,8 +373,12 @@ def get_preprocessor(
     preprocessor : sklearn.compose.ColumnTransformer
         Configured preprocessor applying target-specific transformations.
     """
-    if pipe_name == "gb":
-        continous = Pipeline([("scaler", StandardScaler())])
+    if pipe_name in ["causilo", "tabicl", "tabpfn"]:
+        continuous = Pipeline([("passthrough", "passthrough")])
+        binary = Pipeline([("passthrough", "passthrough")])
+        categorical = Pipeline([("passthrough", "passthrough")])
+    elif pipe_name == "gb":
+        continuous = Pipeline([("scaler", StandardScaler())])
         binary = Pipeline([("scaler", StandardScaler())])
         categorical = Pipeline(
             [
@@ -369,10 +387,10 @@ def get_preprocessor(
                     TargetEncoder(
                         target_type=target_type,
                         cv=(
-                            KFold(n_splits=5, shuffle=True, random_state=None)
+                            KFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
                             if target_type == "continuous"
                             else StratifiedKFold(
-                                n_splits=5, shuffle=True, random_state=None
+                                n_splits=5, shuffle=True, random_state=RANDOM_STATE
                             )
                         ),
                     ),
@@ -381,7 +399,7 @@ def get_preprocessor(
             ]
         )
     elif pipe_name == "linear":
-        continous = Pipeline(
+        continuous = Pipeline(
             [
                 ("imputer", SimpleImputer(strategy="median")),
                 ("scaler", StandardScaler()),
@@ -399,34 +417,12 @@ def get_preprocessor(
                 ("scaler", StandardScaler()),
             ]
         )
-    elif pipe_name == "tabicl":
-        continous = Pipeline([("passthrough", "passthrough")])
-        binary = Pipeline([("passthrough", "passthrough")])
-        categorical = Pipeline(
-            [
-                (
-                    "target",
-                    TargetEncoder(
-                        target_type=target_type,
-                        cv=(
-                            KFold(n_splits=5, shuffle=True, random_state=None)
-                            if target_type == "continuous"
-                            else StratifiedKFold(
-                                n_splits=5, shuffle=True, random_state=None
-                            )
-                        ),
-                    ),
-                ),
-            ]
-        )
-    elif pipe_name == "tabpfn":
-        continous = Pipeline([("passthrough", "passthrough")])
-        binary = Pipeline([("passthrough", "passthrough")])
-        categorical = Pipeline([("passthrough", "passthrough")])
+    else:
+        raise ValueError(f"Unknown pipeline name: {pipe_name!r}")
 
     return ColumnTransformer(
         [
-            ("con", continous, config["X_CONTINUOUS_IND"]),
+            ("con", continuous, config["X_CONTINUOUS_IND"]),
             ("bin", binary, config["X_BINARY_IND"]),
             ("cat", categorical, config["X_MULTICAT_IND"]),
         ]
@@ -434,7 +430,7 @@ def get_preprocessor(
 
 
 def get_estimator_pipeline(
-    config: dict[str, Any], target_type: str, n_classes: int, pipe_name: str
+    config: dict[str, Any], target_type: str, n_classes: int | None, pipe_name: str
 ) -> tuple[Pipeline, dict[str, Any], str]:
     """Construct estimator pipelines, parameter spaces, and evaluation metrics.
 
@@ -446,7 +442,7 @@ def get_estimator_pipeline(
         The target data type indicating regression or classification.
     n_classes : int or None
         Number of target classes (for classification models).
-    pipe_name : {'linear', 'gb', 'tabicl'}
+    pipe_name : {'linear', 'gb', 'tabicl', 'tabpfn', 'causilo'}
         Type of pipeline to construct.
 
     Returns
@@ -461,7 +457,25 @@ def get_estimator_pipeline(
     preprocessor = get_preprocessor(config, target_type, pipe_name=pipe_name)
     scorer = "r2" if target_type == "continuous" else "balanced_accuracy"
 
-    if pipe_name == "gb":
+    if pipe_name == "causilo":
+        space = {}
+        if target_type == "continuous":
+            predictor = CausiloRegressor(
+                n_estimators=10,
+                random_state=RANDOM_STATE,
+                use_kv_cache=True,
+                checkpoint_path=MODELS_DIR / "causilo_regressor/model.safetensors",
+            )
+        elif target_type in ["binary", "multiclass"]:
+            CausiloClassifier.decision_function = decision_func
+            predictor = CausiloClassifier(
+                n_estimators=10,
+                random_state=RANDOM_STATE,
+                use_kv_cache=True,
+                checkpoint_path=MODELS_DIR / "causilo_classifier/model.safetensors",
+            )
+
+    elif pipe_name == "gb":
         lgbm_params = {
             "boosting_type": "gbdt",
             "num_leaves": 100,
@@ -518,7 +532,7 @@ def get_estimator_pipeline(
                 "predictor__path_smooth": loguniform(0.1, 1000),
             }
 
-    if pipe_name == "linear":
+    elif pipe_name == "linear":
         if target_type == "continuous":
             regressor = ElasticNet(max_iter=10000, warm_start=True, selection="random")
             predictor = TransformedTargetRegressor(
@@ -544,18 +558,17 @@ def get_estimator_pipeline(
                 n_estimators=10,
                 batch_size=None,
                 kv_cache=True,
-                model_path="../models/tabicl-regressor-v2-20260212.ckpt",
-                random_state=None,
+                model_path=MODELS_DIR / "tabicl-regressor-v2-20260212.ckpt",
+                random_state=RANDOM_STATE,
             )
         elif target_type in ["binary", "multiclass"]:
-            # Monkey patch TabICLClassifier to support decision_function
-            TabICLClassifier.decision_function = predict_logits
+            TabICLClassifier.decision_function = tabicl_predict_logits
             predictor = TabICLClassifier(
                 n_estimators=10,
                 batch_size=None,
                 kv_cache=True,
-                model_path="../models/tabicl-classifier-v2-20260212.ckpt",
-                random_state=None,
+                model_path=MODELS_DIR / "tabicl-classifier-v2-20260212.ckpt",
+                random_state=RANDOM_STATE,
             )
 
     elif pipe_name == "tabpfn":
@@ -567,12 +580,12 @@ def get_estimator_pipeline(
                     range(len(config["X_CONTINUOUS_IND"]), len(config["X_NAMES"]))
                 ),
                 average_before_softmax=True,
-                model_path="../models/tabpfn-v3.5-fast-20260909.safetensors",
+                model_path=MODELS_DIR / "tabpfn-v3.5-fast-20260909.safetensors",
+                ignore_pretraining_limits=True,
                 fit_mode="fit_with_cache",
-                random_state=None,
+                random_state=RANDOM_STATE,
             )
         elif target_type in ["binary", "multiclass"]:
-            # Monkey patch TabPFNClassifier to support decision_function
             TabPFNClassifier.decision_function = decision_func
             predictor = TabPFNClassifier(
                 n_estimators=10,
@@ -584,10 +597,13 @@ def get_estimator_pipeline(
                 ),
                 balance_probabilities=True,
                 average_before_softmax=True,
-                model_path="../models/tabpfn-v3.5-fast-20260909.safetensors",
+                model_path=MODELS_DIR / "tabpfn-v3.5-fast-20260909.safetensors",
+                ignore_pretraining_limits=True,
                 fit_mode="fit_with_cache",
-                random_state=None,
+                random_state=RANDOM_STATE,
             )
+    else:
+        raise ValueError(f"Unknown pipeline name: {pipe_name!r}")
 
     return (
         Pipeline([("preprocessor", preprocessor), ("predictor", predictor)]),
@@ -596,7 +612,7 @@ def get_estimator_pipeline(
     )
 
 
-def get_splitter(config: dict[str, Any]):
+def get_splitter(config: dict[str, Any]) -> Any:
     """Instantiate CV splitter dynamically based on YAML configurations.
 
     Parameters
@@ -617,6 +633,8 @@ def get_splitter(config: dict[str, Any]):
         return RepeatedGroupKFold(**params)
     elif splitter_name == "ExtendedGroupShuffleSplit":
         return ExtendedGroupShuffleSplit(**params)
+    else:
+        raise ValueError(f"Unknown splitter: {splitter_name!r}")
 
 
 def get_estimator_scores(
@@ -659,7 +677,7 @@ def get_estimator_scores(
         "r2": r2_score(y_tst, y_pred) if target_type == "continuous" else None,
         "acc": (
             balanced_accuracy_score(y_tst, y_pred)
-            if not target_type == "continuous"
+            if target_type != "continuous"
             else None
         ),
         "target_type": target_type,
@@ -667,24 +685,27 @@ def get_estimator_scores(
 
 
 def explain_pipeline(
+    config: dict[str, Any],
     estimator: Pipeline,
     x_trn: np.ndarray,
     x_tst: np.ndarray,
     pipe_name: str,
     target_type: str,
-    classes: list[Any] = None,
+    classes: list[Any] | None = None,
 ) -> dict[Any, Any]:
     """Compute feature interaction explanations using SHAPIQ for model evaluation pipelines.
 
     Parameters
     ----------
+    config : dict of {str: typing.Any}
+        Configuration dictionary containing dataset metadata and parameters.
     estimator : sklearn.pipeline.Pipeline
         Fitted model pipeline to explain.
     x_trn : numpy.ndarray of shape (n_samples_train, n_features)
         Training dataset sample used for background baseline.
     x_tst : numpy.ndarray of shape (n_samples_test, n_features)
         Test dataset sample to explain.
-    pipe_name : {'linear', 'gb', 'tabicl'}
+    pipe_name : {'linear', 'gb', 'tabicl', 'tabpfn', 'causilo'}
         Identifier string of the model architecture.
     target_type : {'continuous', 'binary', 'multiclass'}
         Data type of the target variable.
@@ -700,28 +721,31 @@ def explain_pipeline(
 
     explanations = {}
     for c_class in classes:
-        if target_type in ["binary", "multiclass"]:
-            to_explain = estimator.decision_function
-        else:
-            to_explain = estimator
+        to_explain = (
+            estimator.decision_function
+            if target_type in ["binary", "multiclass"]
+            else estimator
+        )
 
         explainer = TabularExplainer(
             model=to_explain,
             data=x_trn,
             class_index=c_class,
             imputer="marginal",
-            approximator="auto",
+            approximator="permutation",
             index="k-SII",
             max_order=2,
-            random_state=None,
+            random_state=RANDOM_STATE,
             verbose=False,
             sample_size=None,
-        )
+            categorical_features=list(range(len(config["X_CONTINUOUS_IND"]), len(config["X_NAMES"]))),
+            joint_marginal_distribution=False,
+            )
 
         explanations[c_class] = explainer.explain_X(
             x_tst,
             n_jobs=-1 if pipe_name in ["linear", "gb"] else 1,
-            budget=min(2**n_features, 2 * (n_features + math.comb(n_features, 2))),
+            budget=min(2**n_features, 10 * n_features),
         )
 
     return explanations
@@ -781,7 +805,7 @@ def downsample_if_needed(
     if x.shape[0] > target_size:
         logging.info(f" -> {label} downsampled to {target_size} samples for shapiq")
         return resample(
-            x, y, replace=False, n_samples=target_size, random_state=3141592
+            x, y, replace=False, n_samples=target_size, random_state=RANDOM_STATE
         )
 
     return x, y
@@ -796,7 +820,7 @@ def main() -> None:
     """
     setup_logging()
     document_requirements()
-    configs_names = get_configs_names("../configs/oosi_configs_names.yaml")
+    configs_names = get_configs_names(CONFIG_NAMES_PATH)
     configs = get_configs(get_configs_file_names(configs_names))
 
     for config in configs:
@@ -820,12 +844,12 @@ def main() -> None:
 
             for pipe_name in config["PIPELINE_CONFIGS"]:
                 logging.info(f" -> Out-of-Sample-Inference estimator: {pipe_name}")
-                save_path = f"../results/{analysis_name}/{pipe_name}"
-                os.makedirs(save_path, exist_ok=True)
+                save_path = RESULTS_DIR / analysis_name / pipe_name
+                save_path.mkdir(parents=True, exist_ok=True)
 
-                with open(f"{save_path}/config.pkl", "wb") as f:
+                with (save_path / "config.pkl").open("wb") as f:
                     pkl.dump(config, f)
-                with open(f"{save_path}/params.pkl", "wb") as f:
+                with (save_path / "params.pkl").open("wb") as f:
                     pkl.dump(
                         {
                             "y_name": y_name,
@@ -857,7 +881,7 @@ def main() -> None:
                     g_trn = g_df.iloc[train_idx].to_numpy().squeeze()
                     x_trn = x_df.iloc[train_idx].to_numpy().squeeze()
                     y_trn = y_df.iloc[train_idx].to_numpy().squeeze()
-                    g_tst = g_df.iloc[test_idx].to_numpy().squeeze()  # noqa
+                    _ = g_df.iloc[test_idx].to_numpy().squeeze()  # g_tst retained for splitter completeness
                     x_tst = x_df.iloc[test_idx].to_numpy().squeeze()
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 
@@ -890,9 +914,9 @@ def main() -> None:
                     }
 
                     x_trn_sample, y_trn_sample = downsample_if_needed(
-                        x=x_trn, y=y_trn, target_size=120, label="trn"
+                        x=x_trn, y=y_trn, target_size=100, label="trn"
                     )
-                    x_tst_sample, y_tst_sample = downsample_if_needed(
+                    x_tst_sample, _ = downsample_if_needed(
                         x=x_tst, y=y_tst, target_size=40, label="tst"
                     )
                     total_x_tst_sample_shapiq.append(x_tst_sample)
@@ -905,6 +929,7 @@ def main() -> None:
                         log_metrics(tracking[suffix][0], prefix=log_prefix)
 
                         shap_data = explain_pipeline(
+                            config=config,
                             estimator=mdl,
                             x_trn=x_trn_sample,
                             x_tst=x_tst_sample,
@@ -926,7 +951,7 @@ def main() -> None:
                     }
 
                     for filename, datasets in files_to_save.items():
-                        with open(f"{save_path}/{filename}", "wb") as f:
+                        with (save_path / filename).open("wb") as f:
                             pkl.dump(datasets, f)
 
                     logging.info(

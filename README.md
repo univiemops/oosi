@@ -1,6 +1,6 @@
 # oosi
 out of sample inference (oosi)  
-20260909  
+20261112  
   
 How to install python developer environment for oosi via uv on Windows  
 (1)  Download and install Powershell:		https://aka.ms/install-powershell  
@@ -13,9 +13,10 @@ How to install python developer environment for oosi via uv on Windows
 (8)  With Powershell uv create venv: 		uv venv venv-oosi  
 (9)  With Powershell activate venv: 		venv-oosi\Scripts\activate  
 (10) With Powershell uv install packages: 	uv pip install ipywidgets lightgbm openpyxl pyyaml seaborn shapiq spyder-kernels tabicl tabpfn  
-(11) Optional if nvidia: 					uv pip install torch --index-url https://download.pytorch.org/whl/cu134 --upgrade  
-(12) Optional if amd[gfx1012]: 				uv pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "torch[device-gfx1012]==2.14.0+rocm10.1.0" "rocm[libraries,devel,device-gfx1012]==10.1.0" --upgrade
-(13) In Spyder->Tools->Preferences->Python interpreter->Select interpreter navigate to venv-oosi/Scripts and select python.exe  
-(14) Configure config/oosi_configs_names.yaml  
-(15) Configure config/oosi_configs_<data_name>.yaml  
+(11) With Powershell uv install causilo: 	uv pip install git+https://github.com/nums-ai/causilo  
+(12) Optional if nvidia: 					uv pip install torch --index-url https://download.pytorch.org/whl/cu134 --upgrade  
+(13) Optional if amd[gfx1012]: 				uv pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "torch[device-gfx1012]==2.14.0+rocm10.1.0" "rocm[libraries,devel,device-gfx1012]==10.1.0" --upgrade
+(14) In Spyder->Tools->Preferences->Python interpreter->Select interpreter navigate to venv-oosi/Scripts and select python.exe  
+(15) Configure config/oosi_configs_names.yaml  
+(16) Configure config/oosi_configs_<data_name>.yaml  
   

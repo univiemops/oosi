@@ -65,5 +65,5 @@ SPLITTER_PARAMS:
     random_state: 3141592
 
 # Define the list of pipeline configurations to execute sequentially.
-# Valid options: list of "gb", "linear", "tabicl", "tabpfn"
-PIPELINE_CONFIGS: ["gb", "linear", "tabicl", "tabpfn"]
+# Valid options: list of "causilo", "gb", "linear", "tabicl", "tabpfn"
+PIPELINE_CONFIGS: ["causilo", "gb", "linear", "tabicl", "tabpfn"]

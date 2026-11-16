@@ -1,43 +1,63 @@
 # -*- coding: utf-8 -*-
-"""Out-of-sample inference 3 - Exploratory Data Analysis
-v001
+"""Out-of-sample inference 3 - Exploratory data analysis
+v003
 
 @author: david.steyrl@univie.ac.at
 """
 
-import importlib.metadata as im
+from __future__ import annotations
+
+import importlib.metadata as metadata
 import logging
-import os
 import platform
-from typing import Any, Dict, List, Tuple
+import time
 import warnings
+from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import yaml
+from scipy.stats import gaussian_kde, norm
 from sklearn.decomposition import PCA
-from sklearn.ensemble import IsolationForest
 from sklearn.metrics import balanced_accuracy_score, r2_score
-from tabicl import TabICLClassifier
-from tabicl import TabICLRegressor
+from sklearn.preprocessing import StandardScaler
+from tabicl import TabICLClassifier, TabICLRegressor, TabICLUnsupervised
 
 from custom_splitter import RepeatedGroupKFold
 
-# Suppress warnings that clog stdout/stderr during rapid solver iterations
-WARNING_MSGS = ["y_pred contains classes not in y_true"]
-for msg in WARNING_MSGS:
-    os.environ["PYTHONWARNINGS"] = f"ignore:{msg}:::"
-    warnings.filterwarnings("ignore", message=msg)
+# Project paths are relative to the project working directory.
+LOG_DIR = Path("../logs")
+CONFIG_NAMES_PATH = Path("../configs/oosi_configs_names.yaml")
+CONFIG_DIR = Path("../configs")
+DATA_OUTPUT_DIR = Path("../eda")
+
+RANDOM_STATE = 3141592
+N_CV_SPLITS = 5
+N_CV_REPEATS = 2
+N_ESTIMATORS = 10
+N_OUTLIER_PERMUTATIONS = 100
+DEFAULT_CONTAMINATION = 0.01
+FIGURE_DPI = 300
 
 
 def setup_logging() -> None:
-    """Configure simultaneous logging to both a project file and the terminal."""
-    log_dir = "../logs"
-    os.makedirs(log_dir, exist_ok=True)
+    """Configure logging to write to both a project log and the terminal.
+
+    Creates the log directory when it does not yet exist. Existing log files are
+    overwritten at the beginning of each run.
+
+    Returns
+    -------
+    None
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOG_DIR / "oosi_3_eda.log"
+
     logging.basicConfig(
-        filename=f"{log_dir}/oosi_3_eda.log",
+        filename=log_path,
         filemode="w",
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
@@ -45,369 +65,223 @@ def setup_logging() -> None:
     )
 
     console_handler = logging.StreamHandler()
-    console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    console_handler.setFormatter(console_formatter)
+    console_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    )
     console_handler.setLevel(logging.INFO)
     logging.getLogger().addHandler(console_handler)
 
-    logging.info("Logging established")
-    logging.info(f"Logs save at: {log_dir}/oosi_3_eda.log")
+    logging.info("Logging established.")
+    logging.info("Log file: %s", log_path)
 
 
 def document_requirements() -> None:
-    """Document environmental dependencies, logging system configuration and Python specs."""
-    # Get distributions
-    lines = [f"{dist.name}=={dist.version}" for dist in im.distributions()]
+    """Save installed package versions and basic runtime information.
 
-    # Write requirements
-    with open("../logs/requirements_oosi_3_eda.txt", "w", encoding="utf-8") as file:
-        file.write("\n".join(lines) + "\n")
+    Writes the installed distributions to ``../logs/requirements_oosi_3_eda.txt``.
 
-    logging.info(f"OS: {platform.system()} {platform.release()}")
-    logging.info(f"Python Version: {platform.python_version()}")
-    logging.info("Dependencies save at: ../logs/requirements_oosi_3_eda.txt")
+    Returns
+    -------
+    None
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    requirements_path = LOG_DIR / "requirements_oosi_3_eda.txt"
 
+    # Record the complete environment to make analysis runs reproducible.
+    requirements = sorted(
+        f"{distribution.metadata['Name']}=={distribution.version}"
+        for distribution in metadata.distributions()
+        if distribution.metadata.get("Name")
+    )
+    requirements_path.write_text("\n".join(requirements) + "\n", encoding="utf-8")
 
-def get_configs_names(file_path: str) -> List[str]:
-    """Load configurations names list from a specified YAML file."""
-    with open(file_path, "r", encoding="utf-8") as file:
-        configs_names = yaml.safe_load(file)["CONFIGS_NAMES"]
-
-    logging.info(f"Config names loaded: {', '.join(configs_names)}")
-    return configs_names
-
-
-def get_configs_file_names(configs_names: List[str]) -> List[str]:
-    """Convert configuration names into their respective YAML file paths."""
-    config_file_names = [
-        f"../configs/oosi_configs_{name}.yaml" for name in configs_names
-    ]
-    for name in config_file_names:
-        logging.info(f"Config file name to load: {name}")
-    return config_file_names
+    logging.info("Operating system: %s %s", platform.system(), platform.release())
+    logging.info("Python version: %s", platform.python_version())
+    logging.info("Package versions saved to: %s", requirements_path)
 
 
-def get_configs(configs_file_names: List[str]) -> List[Dict[str, Any]]:
-    """Load configuration details and load the associated dataset from files."""
+def get_config_names(file_path: str | Path) -> list[str]:
+    """Load the configuration names from a YAML file.
+
+    Parameters
+    ----------
+    file_path : str or pathlib.Path
+        Path to the YAML file containing the ``CONFIGS_NAMES`` key.
+
+    Returns
+    -------
+    list of str
+        Configuration names to load.
+    """
+    with Path(file_path).open("r", encoding="utf-8") as file:
+        config_names = yaml.safe_load(file)["CONFIGS_NAMES"]
+
+    logging.info("Configuration names: %s", ", ".join(config_names))
+    return config_names
+
+
+def get_config_file_paths(config_names: list[str]) -> list[Path]:
+    """Construct the YAML paths corresponding to configuration names.
+
+    Parameters
+    ----------
+    config_names : list of str
+        Configuration names without the ``oosi_configs_`` prefix.
+
+    Returns
+    -------
+    list of pathlib.Path
+        Paths to the configuration files.
+    """
+    paths = [CONFIG_DIR / f"oosi_configs_{name}.yaml" for name in config_names]
+    for path in paths:
+        logging.info("Configuration file: %s", path)
+    return paths
+
+
+def get_configs(config_file_paths: list[str | Path]) -> list[dict[str, Any]]:
+    """Load YAML configurations and the corresponding Excel data.
+
+    Parameters
+    ----------
+    config_file_paths : list of str or pathlib.Path
+        Paths to the project configuration files.
+
+    Returns
+    -------
+    list of dict
+        Configuration dictionaries augmented with ``G``, ``X``, and ``Y``
+        DataFrames containing group, feature, and target data, respectively.
+    """
     configs = []
-    dtypes = {"G": np.int64, "X": np.float64, "Y": np.float64}
+    data_types = {"G": np.int64, "X": np.float64, "Y": np.float64}
+    column_keys = {"G": "G_NAME", "X": "X_NAMES", "Y": "Y_NAMES"}
 
-    for file_name in configs_file_names:
-        with open(file_name, "r", encoding="utf-8") as file:
+    for file_path in config_file_paths:
+        with Path(file_path).open("r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
 
-        for key, col_key in [("G", "G_NAME"), ("X", "X_NAMES"), ("Y", "Y_NAMES")]:
-            cols = config[col_key]
-            df = pd.read_excel(
+        # Load each group of columns separately to preserve the intended dtypes.
+        for data_key, config_key in column_keys.items():
+            columns = config[config_key]
+            data = pd.read_excel(
                 config["PATH_TO_DATA"],
                 sheet_name=config["SHEET_NAME"],
-                usecols=cols,
-                dtype=dtypes[key],
+                usecols=columns,
+                dtype=data_types[data_key],
             )
-            config[key] = df.reindex(cols, axis=1)
+            config[data_key] = data.reindex(columns=columns)
 
         configs.append(config)
-        logging.info(f"Config and data loaded: {file_name}")
+        logging.info("Configuration and data loaded: %s", file_path)
 
     return configs
 
 
 def get_data(
-    config: Dict[str, Any], y_name: str, drop_target_na=True
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Retrieve features, target, and groups aligned on non-null targets."""
-    if drop_target_na:
-        y_df = config["Y"][y_name].to_frame().dropna()
-    elif not drop_target_na:
-        y_df = config["Y"][y_name].to_frame()
-    g_df = config["G"].reindex(index=y_df.index)
-    x_df = config["X"].reindex(index=y_df.index)
-
-    logging.info(f"Data sliced for {y_name}.")
-    dropped = config["Y"].shape[0] - y_df.shape[0]
-    if dropped > 0:
-        logging.info(f"{dropped} samples dropped due to NaNs in {y_name}.")
-
-    return x_df, y_df, g_df
-
-
-def plot_1D_distribution(config: dict, y_name: str, store_path: str) -> None:
-    """Plot 1D data distributions"""
-    logging.info("1D Data Distributions.")
-
-    x_df, y_df, g_df = get_data(config, y_name)
-    data = pd.concat([x_df, y_df], axis=1)
-
-    # Figure
-    names_max_len = max(len(name) for name in data.columns)
-    n_names = len(data.columns)
-    fig_size = (
-        names_max_len * 0.1 + 5,
-        (n_names + 1) * 1.1 + 1,
-    )
-    fig, axes = plt.subplots(nrows=n_names, ncols=1, figsize=fig_size, sharex=False)
-
-    # Violin plot
-    for ax, column in zip(axes, data.columns):
-        sns.violinplot(
-            data=data[column],
-            bw_method="scott",  # Bandwidth estimation method
-            bw_adjust=0.3,  # Adjust bandwidth
-            cut=2,  # Extend density beyond data
-            density_norm="width",  # Normalize density by width
-            gridsize=100,  # Number of points in density estimation
-            width=0.8,  # Width of violin plot
-            inner="box",  # Show box plot inside violins
-            orient="h",  # Horizontal orientation
-            linewidth=1,  # Line width of violin edges
-            color="#777777",  # Violin color
-            saturation=1.0,  # Saturation level
-            ax=ax,  # Axes to plot on
-        )
-
-        # Formatting subplot
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.set_ylabel(
-            column, rotation="horizontal", horizontalalignment="right", fontsize=10
-        )
-        ax.set_xlabel("", fontsize=10)
-        ax.set_axisbelow(True)
-        ax.grid(axis="y", color="#bbbbbb", linestyle="dotted", alpha=0.3)
-
-    # Formatting figure
-    ax.set_xlabel("Range", fontsize=10)
-    title_str = f"{config['ANALYSIS_NAME']}__{y_name}\nData Distributions (1D)"
-    plt.suptitle(title_str, fontsize=10, y=0.94)
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-
-    # Save
-    save_base_path = f"{store_path}/1_distri_1D"
-    png_save_path = f"{save_base_path}.png"
-    plt.savefig(png_save_path, dpi=300, bbox_inches="tight")
-    plt.show()
-
-
-def plot_2D_distribution(config: dict, y_name: str, store_path: str) -> None:
-    """Plot 2D data distributions"""
-    logging.info("2D Data Distributions.")
-
-    x_df, y_df, g_df = get_data(config, y_name)
-    data = pd.concat([x_df, y_df], axis=1)
-
-    # Pairplot
-    pair_plot = sns.pairplot(
-        data,
-        corner=False,  # Include all pairwise plots
-        diag_kind="kde",  # Use Kernel Density Estimate (KDE) for diagonal
-        plot_kws={"color": "#777777"},  # Set color for pairwise plots
-        diag_kws={"color": "#777777"},  # Set color for diagonal plots
-    )
-
-    # Formatting figure
-    title_str = f"{config['ANALYSIS_NAME']}__{y_name}\nData Distributions (2D)"
-    pair_plot.fig.suptitle(title_str, fontsize=10, y=1.0)
-    pair_plot.map_lower(sns.kdeplot, levels=3, color=".2")
-
-    # Save
-    save_base_path = f"{store_path}/2_distri_2D"
-    png_save_path = f"{save_base_path}.png"
-    pair_plot.savefig(png_save_path, dpi=300, bbox_inches="tight")
-    plt.show()
-
-
-def plot_joint_linear(config: dict, y_name: str, store_path: str) -> None:
-    """Plot Linear Joint Information data (Correlation Heatmap)"""
-    logging.info("Linear Joint Information (Correlation Heatmap).")
-
-    x_df, y_df, g_df = get_data(config, y_name)
-    data = pd.concat([x_df, y_df], axis=1)
-
-    # Figure
-    names_max_len = max(len(name) for name in data.columns)
-    n_names = len(data.columns)
-    fig_size = (
-        n_names * 0.6 + names_max_len * 0.1 + 1,
-        n_names * 0.6 + names_max_len * 0.1 + 1,
-    )
-    fig, ax = plt.subplots(figsize=fig_size)
-    colorbar_label = "|Correlation| (0 to 1)"
-
-    # Correlation heatmap
-    sns.heatmap(
-        data.corr().abs(),  # Compute correlations
-        vmin=0,
-        vmax=1,  # Value range
-        cmap="Greys",  # Color map
-        robust=True,
-        annot=True,  # Show correlation values
-        fmt=".2f",  # Format for annotations
-        annot_kws={"size": 10},  # Annotation font size
-        linewidths=1,  # Grid line width
-        linecolor="#999999",  # Grid line color
-        cbar=True,  # Show color bar
-        cbar_kws={"label": colorbar_label, "shrink": 0.6},  # Color bar settings
-        square=True,  # Square cells
-        xticklabels=data.columns,
-        yticklabels=data.columns,
-        ax=ax,
-    )
-
-    # Formatting figure
-    plt.xticks(rotation=90)
-    plt.yticks(rotation=0)
-    title_str = f"{config['ANALYSIS_NAME']}__{y_name}\nJoint Information in Data (Linear, Correlation)\n"
-    plt.title(title_str, fontsize=10)
-    cb_ax = fig.axes[1]
-    cb_ax.tick_params(labelsize=10)
-    cb_ax.set_ylabel(colorbar_label, fontsize=10)
-    cb_ax.set_box_aspect(50)
-
-    # Save
-    save_base_path = f"{store_path}/3_joint_linear"
-    png_save_path = f"{save_base_path}.png"
-    plt.savefig(png_save_path, dpi=300, bbox_inches="tight")
-    plt.show()
-
-
-def compute_pair_predictions(
-    x: pd.DataFrame, y: pd.DataFrame, g: pd.Series, objective: str
-) -> float:
-    """Compute pairwise prediction score using TabICL.
-    R² for regression, adjusted balanced accuracy for classification.
+    config: dict[str, Any],
+    y_name: str,
+    drop_target_na: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return features, one target, and grouping data with aligned indices.
 
     Parameters
     ----------
-    x: pd.DataFrame
-        DataFrame holding the single predictor feature.
-    y: pd.DataFrame
-        DataFrame holding the target feature.
-    g: pd.Series
-        Series holding group data for cross-validation.
-    objective: str
-        Objective type, either "regression" or "classification".
+    config : dict
+        Configuration dictionary containing the ``X``, ``Y``, and ``G``
+        DataFrames.
+    y_name : str
+        Name of the target column to retrieve.
+    drop_target_na : bool, default=True
+        Whether to remove observations with a missing target value.
 
     Returns
     -------
-    float: Pairwise prediction score (>=0).
+    tuple of pandas.DataFrame
+        Feature, target, and group DataFrames with matching row indices.
     """
-    # Remove Nans
-    y.dropna(inplace=True)
-    x_na = x.reindex(index=y.index)
-    x_na.dropna(inplace=True)
-    y_na = y.reindex(index=x_na.index)
-    g_na = g.reindex(index=x_na.index)
+    if y_name not in config["Y"].columns:
+        raise KeyError(f"Target column {y_name!r} is not present in config['Y'].")
 
-    x_na.reset_index(inplace=True, drop=True)
-    y_na.reset_index(inplace=True, drop=True)
+    y_data = config["Y"][[y_name]].copy()
+    if drop_target_na:
+        y_data = y_data.dropna(subset=[y_name])
 
-    cv = RepeatedGroupKFold(n_splits=5, n_repeats=2, random_state=None)
-    scores = []
-    if objective == "continuous":
-        estimator = TabICLRegressor(
-            kv_cache=True,
-            model_path="../models/tabicl-regressor-v2-20260212.ckpt",
-            random_state=None,
-        )
-    elif objective == "categorical":
-        estimator = TabICLClassifier(
-            kv_cache=True if y_na.iloc[:, 0].nunique() <= 10 else False,
-            model_path="../models/tabicl-classifier-v2-20260212.ckpt",
-            random_state=None,
+    x_data = config["X"].reindex(index=y_data.index)
+    group_data = config["G"].reindex(index=y_data.index)
+
+    if group_data.shape[1] != 1:
+        raise ValueError("Exactly one grouping variable is required.")
+
+    n_dropped = len(config["Y"]) - len(y_data)
+    logging.info("-> Data sliced for target %s.", y_name)
+    if n_dropped:
+        logging.info(
+            "-> %d observations removed due to missing target values.", n_dropped
         )
 
-    # Cross-validation loop
-    for i_cv, (i_trn, i_tst) in enumerate(cv.split(g_na, groups=g_na)):
-        y_trn = y_na.iloc[i_trn]
-        x_trn = x_na.iloc[i_trn]
-        y_tst = y_na.iloc[i_tst]
-        x_tst = x_na.iloc[i_tst]
-
-        # Robust fit and score prediction
-        estimator.fit(x_trn.to_numpy(), y_trn.to_numpy().squeeze())
-        y_pred = estimator.predict(x_tst.to_numpy().squeeze().reshape(-1, 1))
-
-        if objective == "continuous":
-            score = r2_score(y_tst.to_numpy().squeeze(), y_pred)
-        elif objective == "categorical":
-            score = balanced_accuracy_score(
-                y_tst.to_numpy().squeeze(), y_pred, adjusted=True
-            )
-        else:
-            raise ValueError(f"Objective is {objective}.")
-
-        scores.append(score)
-
-        pair_pred = max(0.0, float(np.nanmean(scores)))
-
-    return pair_pred
+    return x_data, y_data, group_data
 
 
-def plot_pair_predictions(config: dict, y_name: str, store_path: str) -> None:
-    """Pairwise Prediction Heatmap"""
-    logging.info("Pairwise Prediction Heatmap via TabICL.")
+def _save_and_show_figure(fig: plt.Figure, output_path: Path) -> None:
+    """Save, display, and close a Matplotlib figure.
 
-    x_df, y_df, g_df = get_data(config, y_name, drop_target_na=False)
-    data = pd.concat([x_df, y_df], axis=1)
-    feature_names = data.columns
-    feature_count = len(feature_names)
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure to save and display.
+    output_path : pathlib.Path
+        Destination PNG path.
 
-    # Initialize pairwise prediction matrix (diagonal starts as 1)
-    pair_predictions = np.ones((feature_count, feature_count))
+    Returns
+    -------
+    None
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=FIGURE_DPI, bbox_inches="tight")
+    plt.show()
+    plt.close(fig)
 
-    # Pre-compute the task objective for each feature to prevent redundant evaluations
-    column_objectives = {}
-    for idx, col in enumerate(x_df.columns):
-        if idx in config["X_CONTINUOUS_IND"]:
-            column_objectives[col] = "continuous"
-        elif idx in config["X_BINARY_IND"]:
-            column_objectives[col] = "categorical"
-        elif idx in config["X_MULTICAT_IND"]:
-            column_objectives[col] = "categorical"
-        else:
-            raise ValueError(f"Index {idx} not in X_IND.")
 
-    for idx, col in enumerate(y_df.columns):
-        if idx in config["Y_CONTINUOUS_IND"]:
-            column_objectives[col] = "continuous"
-        elif idx in config["Y_BINARY_IND"]:
-            column_objectives[col] = "categorical"
-        elif idx in config["Y_MULTICLASS_IND"]:
-            column_objectives[col] = "categorical"
-        else:
-            raise ValueError(f"Index {idx} not in Y_IND.")
+def _format_heatmap(
+    matrix: np.ndarray | pd.DataFrame,
+    labels: list[str] | pd.Index,
+    title: str,
+    colorbar_label: str,
+    output_path: Path,
+) -> None:
+    """Draw and save a consistently formatted square heatmap.
 
-    # Iteratively run TabICL on all pairwise permutations
-    for id_pred1, name_pred1 in enumerate(feature_names):
-        for id_pred2, name_pred2 in enumerate(feature_names):
-            if id_pred1 == id_pred2:
-                continue  # Skip diagonal
+    Parameters
+    ----------
+    matrix : array-like
+        Values to display in the heatmap.
+    labels : list of str or pandas.Index
+        Labels for both matrix axes.
+    title : str
+        Figure title.
+    colorbar_label : str
+        Label displayed beside the colorbar.
+    output_path : pathlib.Path
+        Destination PNG path.
 
-            # Slicing safely out of pre-allocated df_all
-            xt = data[[name_pred1]]
-            yt = data[[name_pred2]]
-            objective = column_objectives[name_pred2]
-
-            # Evaluate pairwise predicting capability
-            pair_predictions[id_pred1, id_pred2] = compute_pair_predictions(
-                x=xt, y=yt, g=g_df, objective=objective
-            )
-
-    # Figure
-    names_max_len = max(len(name) for name in feature_names)
-    fig_size = (
-        feature_count * 0.6 + names_max_len * 0.1 + 1,
-        feature_count * 0.6 + names_max_len * 0.1 + 1,
+    Returns
+    -------
+    None
+    """
+    max_label_length = max(map(len, labels))
+    n_features = len(labels)
+    figure_size = (
+        n_features * 0.6 + max_label_length * 0.1 + 1,
+        n_features * 0.6 + max_label_length * 0.1 + 1,
     )
-    fig, ax = plt.subplots(figsize=fig_size)
-    colorbar_label = "|Pairwise Predictions| (0 to 1)"
+    fig, ax = plt.subplots(figsize=figure_size)
 
     sns.heatmap(
-        pair_predictions,
+        matrix,
         vmin=0,
         vmax=1,
         cmap="Greys",
-        robust=True,
         annot=True,
         fmt=".2f",
         annot_kws={"size": 10},
@@ -416,165 +290,802 @@ def plot_pair_predictions(config: dict, y_name: str, store_path: str) -> None:
         cbar=True,
         cbar_kws={"label": colorbar_label, "shrink": 0.6},
         square=True,
-        xticklabels=feature_names,
-        yticklabels=feature_names,
+        xticklabels=labels,
+        yticklabels=labels,
         ax=ax,
     )
-    title_str = (
-        f"{config['ANALYSIS_NAME']}__{y_name}\n"
-        "Pairwise Predictions via TabICL\n"
-        "Y-axis: Predictors, X-axis: Prediction Targets"
+    ax.set_title(title, fontsize=10)
+    ax.tick_params(axis="x", rotation=90)
+    ax.tick_params(axis="y", rotation=0)
+    fig.axes[-1].tick_params(labelsize=10)
+    fig.axes[-1].set_ylabel(colorbar_label, fontsize=10)
+    _save_and_show_figure(fig, output_path)
+
+
+def plot_1d_distribution(
+    config: dict[str, Any], y_name: str, store_path: str | Path
+) -> None:
+    """Plot univariate distributions for all features and the selected target.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration and loaded data.
+    y_name : str
+        Target column used to select the analysis sample.
+    store_path : str or pathlib.Path
+        Directory in which the figure is saved.
+
+    Returns
+    -------
+    None
+    """
+    logging.info("[+] Plotting univariate distributions.")
+    x_data, y_data, _ = get_data(config, y_name)
+    data = pd.concat([x_data, y_data], axis=1)
+
+    max_name_length = max(map(len, data.columns))
+    n_columns = len(data.columns)
+    figure_size = (max_name_length * 0.1 + 5, (n_columns + 1) * 1.1 + 1)
+    fig, axes = plt.subplots(
+        nrows=n_columns,
+        ncols=1,
+        figsize=figure_size,
+        sharex=False,
+        squeeze=False,
     )
-    plt.title(title_str, fontsize=10)
 
-    # Save
-    save_base_path = f"{store_path}/4_pair_predictions"
-    png_save_path = f"{save_base_path}.png"
-    plt.savefig(png_save_path, dpi=300, bbox_inches="tight")
-    plt.show()
+    # Use one horizontal violin plot per variable for comparable summaries.
+    for ax, column in zip(axes[:, 0], data.columns):
+        sns.violinplot(
+            x=data[column],
+            bw_method="scott",
+            bw_adjust=0.25,
+            cut=2,
+            density_norm="width",
+            gridsize=100,
+            width=0.8,
+            inner="box",
+            orient="h",
+            linewidth=1,
+            color="#777777",
+            saturation=1.0,
+            ax=ax,
+        )
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_ylabel(
+            column,
+            rotation="horizontal",
+            horizontalalignment="right",
+            fontsize=10,
+        )
+        ax.set_xlabel("")
+        ax.set_axisbelow(True)
+        ax.grid(axis="y", color="#bbbbbb", linestyle="dotted", alpha=0.3)
 
-
-def plot_pca(config: dict, y_name: str, store_path: str) -> None:
-    """Multidimensional Pattern Visualization with PCA"""
-    logging.info("Multidimensional Pattern Visualization with PCA.")
-
-    x_df, y_df, g_df = get_data(config, y_name)
-
-    # PCA
-    pca = PCA(
-        n_components=x_df.shape[1],
-        copy=True,
-        whiten=False,
-        svd_solver="auto",
-        tol=0.0001,
-        iterated_power="auto",
-        random_state=None,
+    axes[-1, 0].set_xlabel("Range", fontsize=10)
+    fig.suptitle(
+        f"{config['ANALYSIS_NAME']}__{y_name}\n1D Data Distributions\n",
+        fontsize=10,
+        y=0.99,
     )
-    pca.fit(x_df.dropna())
+    fig.tight_layout(rect=[0, 0.03, 1, 0.96])
 
-    # Figure
-    n_names = len(x_df.columns)
-    fig_width = min((1 + n_names * 0.6), 16)
-    fig_size = (fig_width, 4)
-    fig, ax = plt.subplots(figsize=fig_size)
+    _save_and_show_figure(fig, Path(store_path) / "1_1D_distributions.png")
+
+    logging.info("[✓] Plotting univariate distributions finished.")
+
+
+def plot_2d_distribution(
+    config: dict[str, Any], y_name: str, store_path: str | Path
+) -> None:
+    """Plot pairwise feature and target distributions.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration and loaded data.
+    y_name : str
+        Target column used to select the analysis sample.
+    store_path : str or pathlib.Path
+        Directory in which the figure is saved.
+
+    Returns
+    -------
+    None
+    """
+    logging.info("[+] Plotting pairwise distributions.")
+    x_data, y_data, _ = get_data(config, y_name)
+    data = pd.concat([x_data, y_data], axis=1)
+
+    pair_plot = sns.pairplot(
+        data,
+        corner=False,
+        diag_kind="kde",
+        plot_kws={"color": "#777777"},
+        diag_kws={"color": "#777777"},
+    )
+    pair_plot.map_lower(sns.kdeplot, levels=3, color=".2")
+    pair_plot.fig.suptitle(
+        f"{config['ANALYSIS_NAME']}__{y_name}\n2D Data Distributions\n",
+        fontsize=10,
+        y=1.0,
+    )
+    _save_and_show_figure(pair_plot.fig, Path(store_path) / "2_2D_distributions.png")
+
+    logging.info("[✓] Plotting pairwise distributions finished.")
+
+
+def plot_bivariate_correlation(
+    config: dict[str, Any], y_name: str, store_path: str | Path
+) -> None:
+    """Plot absolute pairwise correlations for features and the target.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration and loaded data.
+    y_name : str
+        Target column used to select the analysis sample.
+    store_path : str or pathlib.Path
+        Directory in which the figure is saved.
+
+    Returns
+    -------
+    None
+    """
+    logging.info("[+] Plotting bivariate correlations.")
+    x_data, y_data, _ = get_data(config, y_name)
+    data = pd.concat([x_data, y_data], axis=1)
+    correlations = data.corr(numeric_only=True).abs()
+
+    _format_heatmap(
+        matrix=correlations,
+        labels=correlations.columns,
+        title=(
+            f"{config['ANALYSIS_NAME']}__{y_name}\n"
+            "Bivariate Correlations (Absolute Values)\n"
+        ),
+        colorbar_label="|Correlation| (0 to 1)",
+        output_path=Path(store_path) / "3_bivariate_correlations.png",
+    )
+
+    logging.info("[✓] Plotting bivariate correlations finished.")
+
+
+def _get_column_objectives(
+    config: dict[str, Any], x_columns: list[str], y_name: str
+) -> dict[str, str]:
+    """Map each feature and target column to its prediction objective.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration containing feature and target type indices.
+    x_columns : list of str
+        Names of the predictor columns.
+    y_name : str
+        Name of the selected target column.
+
+    Returns
+    -------
+    dict of str
+        Mapping from column name to ``'regression'`` or ``'classification'``.
+    """
+    objectives: dict[str, str] = {}
+    feature_type_indices = {
+        "regression": config["X_CONTINUOUS_IND"],
+        "classification": [
+            *config["X_BINARY_IND"],
+            *config["X_MULTICAT_IND"],
+        ],
+    }
+
+    # Validate that every feature index belongs to exactly one declared type.
+    for objective, indices in feature_type_indices.items():
+        for index in indices:
+            if index < 0 or index >= len(x_columns):
+                raise ValueError(f"Feature index {index} is outside the X columns.")
+            column = x_columns[index]
+            if column in objectives:
+                raise ValueError(f"Feature {column!r} has multiple declared types.")
+            objectives[column] = objective
+
+    missing_feature_indices = set(range(len(x_columns))) - {
+        index for indices in feature_type_indices.values() for index in indices
+    }
+    if missing_feature_indices:
+        raise ValueError(
+            "Feature indices missing from X_CONTINUOUS_IND, X_BINARY_IND, "
+            f"or X_MULTICAT_IND: {sorted(missing_feature_indices)}"
+        )
+
+    # Y indices refer to the original Y_NAMES list, not the one-column slice.
+    target_index = config["Y_NAMES"].index(y_name)
+    target_types = {
+        "regression": config["Y_CONTINUOUS_IND"],
+        "classification": [
+            *config["Y_BINARY_IND"],
+            *config["Y_MULTICLASS_IND"],
+        ],
+    }
+    matching_objectives = [
+        objective
+        for objective, indices in target_types.items()
+        if target_index in indices
+    ]
+    if len(matching_objectives) != 1:
+        raise ValueError(
+            f"Target {y_name!r} (index {target_index}) must have exactly one "
+            "declared objective in the Y_*_IND configuration keys."
+        )
+
+    if y_name in objectives:
+        raise ValueError(f"Target name {y_name!r} duplicates a predictor column name.")
+    objectives[y_name] = matching_objectives[0]
+    return objectives
+
+
+def _make_tabicl_estimator(objective: str) -> TabICLClassifier | TabICLRegressor:
+    """Create the TabICL estimator corresponding to a prediction objective.
+
+    Parameters
+    ----------
+    objective : str
+        Either ``'regression'`` or ``'classification'``.
+
+    Returns
+    -------
+    TabICLClassifier or TabICLRegressor
+        A reproducibly configured TabICL estimator.
+    """
+    common_parameters = {
+        "n_estimators": N_ESTIMATORS,
+        "random_state": RANDOM_STATE,
+    }
+    if objective == "regression":
+        return TabICLRegressor(
+            model_path="../models/tabicl-regressor-v2-20260212.ckpt",
+            **common_parameters,
+        )
+    if objective == "classification":
+        return TabICLClassifier(
+            model_path="../models/tabicl-classifier-v2-20260212.ckpt",
+            **common_parameters,
+        )
+    raise ValueError(
+        "objective must be either 'regression' or 'classification'. "
+        f"Received {objective!r}."
+    )
+
+
+def compute_bivariate_predictions(
+    x: pd.DataFrame,
+    y: pd.DataFrame,
+    groups: pd.Series,
+    objective: str,
+) -> float:
+    """Estimate a pairwise prediction score with repeated group CV and TabICL.
+
+    Regression is evaluated using :math:`R^2`; classification is evaluated using
+    adjusted balanced accuracy. Negative fold-averaged scores are clipped to zero
+    so that the returned score can be displayed on a zero-to-one heatmap.
+
+    Parameters
+    ----------
+    x : pandas.DataFrame
+        One-column DataFrame containing the predictor.
+    y : pandas.DataFrame
+        One-column DataFrame containing the prediction target.
+    groups : pandas.Series
+        Group labels used to keep groups separate across CV folds.
+    objective : str
+        Either ``'regression'`` or ``'classification'``.
+
+    Returns
+    -------
+    float
+        Mean cross-validated prediction score, clipped to the interval [0, 1].
+    """
+    if objective not in {"regression", "classification"}:
+        raise ValueError(f"Unknown prediction objective: {objective!r}.")
+    if x.shape[1] != 1 or y.shape[1] != 1:
+        raise ValueError("Bivariate prediction requires one predictor and one target.")
+
+    # All three inputs must be complete for a row to enter group cross-validation.
+    aligned_data = pd.concat(
+        [
+            x.rename(columns={x.columns[0]: "predictor"}),
+            y.rename(columns={y.columns[0]: "target"}),
+            groups.rename("group"),
+        ],
+        axis=1,
+    ).dropna()
+    aligned_data = aligned_data.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if len(aligned_data) < N_CV_SPLITS + 1:
+        return 0.0
+    if aligned_data["group"].nunique() < N_CV_SPLITS:
+        logging.warning(
+            "Pairwise prediction skipped: fewer than %d unique groups.",
+            N_CV_SPLITS,
+        )
+        return 0.0
+
+    x_values = aligned_data[["predictor"]].to_numpy(dtype=np.float32)
+    y_values = aligned_data["target"].to_numpy()
+    group_values = aligned_data["group"].to_numpy()
+
+    if objective == "classification" and pd.Series(y_values).nunique() < 2:
+        return 0.0
+
+    cross_validator = RepeatedGroupKFold(
+        n_splits=N_CV_SPLITS,
+        n_repeats=N_CV_REPEATS,
+        random_state=RANDOM_STATE,
+    )
+    estimator = _make_tabicl_estimator(objective)
+    fold_scores = []
+
+    # Each split keeps all observations from a group in either train or test.
+    for train_indices, test_indices in cross_validator.split(
+        x_values, groups=group_values
+    ):
+        x_train = x_values[train_indices]
+        x_test = x_values[test_indices]
+        y_train = y_values[train_indices]
+        y_test = y_values[test_indices]
+
+        if len(y_test) < 2:
+            continue
+        if objective == "classification":
+            # A one-class training fold cannot define a useful classifier.
+            if pd.Series(y_train).nunique() < 2:
+                continue
+            if pd.Series(y_test).nunique() < 2:
+                continue
+
+        estimator.fit(x_train, y_train)
+        predictions = estimator.predict(x_test)
+
+        if objective == "regression":
+            score = r2_score(y_test, predictions)
+        else:
+            # A prediction can contain a class absent from the test fold. Such
+            # folds are still scored by sklearn, but the warning is not actionable.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="y_pred contains classes not in y_true",
+                    category=UserWarning,
+                )
+                score = balanced_accuracy_score(
+                    y_test,
+                    predictions,
+                    adjusted=True,
+                )
+
+        if np.isfinite(score):
+            fold_scores.append(float(score))
+
+    if not fold_scores:
+        return 0.0
+    return float(np.clip(np.mean(fold_scores), 0.0, 1.0))
+
+
+def plot_bivariate_predictions(
+    config: dict[str, Any], y_name: str, store_path: str | Path
+) -> None:
+    """Plot TabICL cross-validated prediction scores for every feature pair.
+
+    Rows of the matrix are predictors and columns are prediction targets. The
+    diagonal is fixed to one because each variable predicts itself.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration and loaded data.
+    y_name : str
+        Target column included in the pairwise analysis.
+    store_path : str or pathlib.Path
+        Directory in which the figure is saved.
+
+    Returns
+    -------
+    None
+    """
+    logging.info("[+] Computing pairwise predictions with TabICL.")
+    x_data, y_data, group_data = get_data(
+        config,
+        y_name,
+        drop_target_na=False,
+    )
+    data = pd.concat([x_data, y_data], axis=1)
+    feature_names = list(data.columns)
+    if len(feature_names) != len(set(feature_names)):
+        raise ValueError("Predictor and target column names must be unique.")
+
+    objectives = _get_column_objectives(config, list(x_data.columns), y_name)
+    pairwise_scores = np.eye(len(feature_names), dtype=float)
+
+    # Predict each column from each other column. The matrix is directional:
+    # predicting A from B need not yield the same score as predicting B from A.
+    for predictor_index, predictor_name in enumerate(feature_names):
+        for target_index, target_name in enumerate(feature_names):
+            start_time = time.time()
+            pairwise_scores[predictor_index, target_index] = (
+                compute_bivariate_predictions(
+                    x=data[[predictor_name]],
+                    y=data[[target_name]],
+                    groups=group_data.iloc[:, 0],
+                    objective=objectives[target_name],
+                )
+            )
+            logging.info(
+                f"-> TabICL prediction: {predictor_name} -> {target_name}, run time: {time.time() - start_time:.2f}s"
+            )
+
+    _format_heatmap(
+        matrix=pairwise_scores,
+        labels=feature_names,
+        title=(
+            f"{config['ANALYSIS_NAME']}__{y_name}\n"
+            "Bivariate Predictions via TabICL\n"
+            "Rows: predictors | Columns: predictions"
+        ),
+        colorbar_label="Prediction score (0 to 1)",
+        output_path=Path(store_path) / "4_bivariate_predictions.png",
+    )
+
+    logging.info("[✓] Computing pairwise predictions with TabICL finished.")
+
+
+def plot_pca(config: dict[str, Any], y_name: str, store_path: str | Path) -> None:
+    """Plot the variance explained by principal components of the feature data.
+
+    PCA is applied to complete feature rows after standardization. The selected
+    target is used to define the analysis sample but is not included in PCA.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration and loaded data.
+    y_name : str
+        Target column used to select the analysis sample.
+    store_path : str or pathlib.Path
+        Directory in which the figure is saved.
+
+    Returns
+    -------
+    None
+    """
+    logging.info("[+] Computing principal component analysis.")
+    x_data, _, _ = get_data(config, y_name)
+    x_complete = x_data.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if x_complete.shape[1] == 0:
+        raise ValueError("PCA requires at least one feature.")
+    if len(x_complete) < 2:
+        raise ValueError("PCA requires at least two complete observations.")
+
+    # PCA cannot have more components than either samples or features.
+    n_components = min(x_complete.shape[0], x_complete.shape[1])
+    scaled_features = StandardScaler().fit_transform(x_complete)
+    pca = PCA(n_components=n_components, random_state=RANDOM_STATE)
+    pca.fit(scaled_features)
+
+    explained_variance = pca.explained_variance_ratio_
+    cumulative_variance = np.cumsum(explained_variance)
+    figure_width = min(1 + len(x_data.columns) * 0.6, 16)
+    fig, ax = plt.subplots(figsize=(figure_width, 4))
+    components = np.arange(1, len(explained_variance) + 1)
+
     ax.plot(
-        pca.explained_variance_ratio_,
+        components,
+        explained_variance,
         color="cornflowerblue",
         label="Explained variance per component",
     )
-    ax.plot(
-        pca.explained_variance_ratio_,
-        color="black",
-        marker=".",
-        linestyle="None",
-    )
-    ax.set_xlim((-0.01, ax.get_xlim()[1]))
-    ax.set_ylim((-0.01, 1.01))
+    ax.plot(components, explained_variance, color="black", marker=".", linestyle="None")
+    ax.set_ylim(-0.01, 1.01)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.set_xlabel("PCA-component")
-    ax.set_ylabel("Explained Variance", color="cornflowerblue")
-    ax2 = ax.twinx()
-    ax2.plot(
-        np.cumsum(pca.explained_variance_ratio_),
+    ax.set_xlabel("Principal component")
+    ax.set_ylabel("Explained variance per component", color="cornflowerblue")
+
+    cumulative_ax = ax.twinx()
+    cumulative_ax.plot(
+        components,
+        cumulative_variance,
         color="orange",
         label="Cumulative explained variance",
     )
-    ax2.plot(
-        np.cumsum(pca.explained_variance_ratio_),
+    cumulative_ax.plot(
+        components,
+        cumulative_variance,
         color="black",
         marker=".",
         linestyle="None",
     )
-    ax2.set_xlim((-0.01, ax2.get_xlim()[1]))
-    ax2.set_ylim((-0.01, 1.01))
-    ax2.spines["top"].set_visible(False)
-    ax2.spines["left"].set_visible(False)
-    ax2.set_ylabel("Cumulative Variance", color="orange")
-    for comp, t in enumerate(pca.explained_variance_ratio_.round(2)):
-        ax.text(comp, t, t, fontsize=10)
-    for comp, t in enumerate(np.cumsum(pca.explained_variance_ratio_).round(2)):
-        ax2.text(comp, t, t, fontsize=10)
-    title_str = f"{config['ANALYSIS_NAME']}__{y_name}\nMultidimensional pattern in data via PCA (linear)\n"
-    plt.title(title_str, fontsize=10)
+    cumulative_ax.set_ylim(-0.01, 1.01)
+    cumulative_ax.spines["top"].set_visible(False)
+    cumulative_ax.spines["left"].set_visible(False)
+    cumulative_ax.set_ylabel("Cumulative explained variance", color="orange")
 
-    # Save
-    save_base_path = f"{store_path}/5_pca"
-    png_save_path = f"{save_base_path}.png"
-    plt.savefig(png_save_path, dpi=300, bbox_inches="tight")
-    plt.show()
+    # Annotate both curves with rounded values for quick visual interpretation.
+    for component, value in zip(components, explained_variance):
+        ax.annotate(f"{value:.2f}", (component, value), fontsize=8)
+    for component, value in zip(components, cumulative_variance):
+        cumulative_ax.annotate(f"{value:.2f}", (component, value), fontsize=8)
 
-
-def plot_outlier_detection(config: dict, y_name: str, store_path: str) -> None:
-    """Outlier Detection using Isolation Forest"""
-    logging.info("Outlier Detection using Isolation Forest.")
-
-    x_df, y_df, g_df = get_data(config, y_name)
-
-    # Isolation Forest
-    iForest = IsolationForest(
-        n_estimators=10000,
-        max_samples="auto",
-        contamination="auto",
-        max_features=0.66,
-        bootstrap=False,
-        n_jobs=-2,  # Use all available processors
-        random_state=None,
-        verbose=0,
-        warm_start=False,
+    ax.set_title(
+        f"{config['ANALYSIS_NAME']}__{y_name}\n"
+        "Dominant patterns of variation and structure in the data via PCA\n",
+        fontsize=10,
     )
-    outlier = iForest.fit_predict(x_df)
-    outlier_df = pd.DataFrame(data=outlier, columns=["is_outlier"])
-    outlier_score = iForest.decision_function(x_df)
+    _save_and_show_figure(fig, Path(store_path) / "5_pca.png")
 
-    # Figure
+    logging.info("[✓] Computing principal component analysis finished.")
+
+
+def _get_categorical_feature_indices(config: dict[str, Any]) -> list[int]:
+    """Return the configured categorical feature indices for TabICL.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration containing ``X_BINARY_IND`` and
+        ``X_MULTICAT_IND``.
+
+    Returns
+    -------
+    list of int
+        Sorted, unique zero-based indices of categorical predictor columns.
+    """
+    categorical_indices = sorted(
+        set(config["X_BINARY_IND"]) | set(config["X_MULTICAT_IND"])
+    )
+    n_features = len(config["X_NAMES"])
+    invalid_indices = [
+        index for index in categorical_indices if index < 0 or index >= n_features
+    ]
+    if invalid_indices:
+        raise ValueError(
+            f"Categorical feature indices outside the X columns: {invalid_indices}"
+        )
+    return categorical_indices
+
+
+def plot_outlier_detection(
+    config: dict[str, Any],
+    y_name: str,
+    store_path: str | Path,
+    contamination: float = DEFAULT_CONTAMINATION,
+    n_estimators: int = N_ESTIMATORS,
+    n_permutations: int = N_OUTLIER_PERMUTATIONS,
+) -> None:
+    """Detect unusual observations with TabICLUnsupervised outlier detection.
+
+    The method estimates each observation's joint feature density using
+    ``TabICLUnsupervised.score_samples``. Lower scores indicate observations that
+    are less typical under the learned joint distribution. KDE smoothing is applied
+    to the joint density scores, a robust normal distribution is fitted where the
+    location (mean) is aligned with the center of the KDE peak/plateau and the scale
+    is derived from the Full Width at Half Maximum (FWHM) of the KDE curve, and the
+    cutoff is derived from this fitted normal distribution using the specified
+    contamination level (default 0.01).
+
+    Rows with missing or infinite feature values are excluded from scoring and
+    retained in the exported table with missing scores and flags.
+
+    Parameters
+    ----------
+    config : dict
+        Analysis configuration and loaded data.
+    y_name : str
+        Target column used to select the analysis sample.
+    store_path : str or pathlib.Path
+        Directory in which the plot and Excel output are saved.
+    contamination : float, default=0.01
+        Fraction of the lowest-scoring observations to flag based on the robust
+        fitted normal distribution. Must be between zero and 0.5.
+    n_estimators : int, default=8
+        Number of ensemble estimators used by TabICLUnsupervised.
+    n_permutations : int, default=10
+        Number of feature orderings used to estimate each joint-density score.
+
+    Returns
+    -------
+    None
+    """
+    logging.info("[+] Detecting outliers with TabICLUnsupervised.")
+    if not 0 < contamination < 0.5:
+        raise ValueError("contamination must be between 0 and 0.5.")
+    if n_estimators < 1:
+        raise ValueError("n_estimators must be a positive integer.")
+    if n_permutations < 1:
+        raise ValueError("n_permutations must be a positive integer.")
+
+    x_data, _, _ = get_data(config, y_name)
+    valid_rows = x_data.notna().all(axis=1) & np.isfinite(x_data).all(axis=1)
+    x_complete = x_data.loc[valid_rows].copy()
+
+    if len(x_complete) < 10:
+        raise ValueError(
+            "At least 10 complete observations are required for outlier detection."
+        )
+    if x_complete.shape[1] < 1:
+        raise ValueError("At least one feature is required for outlier detection.")
+
+    # TabICLUnsupervised uses these indices to choose classifier or regressor
+    # conditionals. This avoids relying on automatic cardinality-based detection.
+    categorical_indices = _get_categorical_feature_indices(config)
+    model = TabICLUnsupervised(
+        n_estimators=n_estimators,
+        categorical_features=categorical_indices,
+        random_state=RANDOM_STATE,
+    )
+    model.fit(x_complete.to_numpy())
+    scores = model.score_samples(x_complete.to_numpy(), n_permutations=n_permutations)
+    scores_log = np.log10(scores)
+
+    # KDE smoothing
+    kde = gaussian_kde(scores_log)
+
+    # Grid for evaluating KDE
+    x_grid = np.linspace(scores_log.min(), scores_log.max(), 2000)
+    kde_densities = kde(x_grid)
+    max_dens = np.max(kde_densities)
+
+    # Align normal distribution peak (mu) stably with the center of the KDE peak/plateau region
+    # (using the median of all grid points where KDE density is >= 80% of the maximum density).
+    peak_mask = kde_densities >= 0.80 * max_dens
+    mu = float(np.median(x_grid[peak_mask]))
+
+    # Determine spread (std) from the Full Width at Half Maximum (FWHM) of the KDE curve
+    # This matches the normal distribution's spread directly to the KDE peak's width while ignoring tail edges.
+    half_max_mask = kde_densities >= 0.50 * max_dens
+    x_half_max = x_grid[half_max_mask]
+    fwhm = x_half_max[-1] - x_half_max[0]
+    std = (
+        fwhm / 2.35482
+    )  # Factor relating FWHM to standard deviation of a normal distribution
+    if std == 0.0 or not np.isfinite(std):
+        std = float(np.std(scores_log)) or 1.0
+
+    # Thresholds for outlier
+    score_threshold_log = norm.ppf(contamination, loc=mu, scale=std)
+    score_threshold = 10**score_threshold_log
+    is_outlier = scores <= score_threshold
+    score_percentiles = pd.Series(scores, index=x_complete.index).rank(
+        method="average",
+        pct=True,
+    )
+
+    # Preserve all original observations in the output for straightforward joins.
+    result_data = pd.DataFrame(index=x_data.index)
+    result_data["outlier_score"] = np.nan
+    result_data["is_outlier"] = pd.Series(
+        pd.NA,
+        index=x_data.index,
+        dtype="boolean",
+    )
+    result_data["outlier_score_rank_percentile"] = np.nan
+    result_data.loc[x_complete.index, "outlier_score"] = scores
+    result_data.loc[x_complete.index, "is_outlier"] = is_outlier
+    result_data.loc[x_complete.index, "outlier_score_rank_percentile"] = (
+        score_percentiles
+    )
+    result_data.index.name = x_data.index.name or "observation_index"
+
     fig, ax = plt.subplots(figsize=(8, 5))
-    sns.histplot(data=outlier_score, bins=30, kde=True, color="#777777", ax=ax)
+
+    # Plot the histogram bars without KDE
+    sns.histplot(
+        x=scores_log,
+        bins=31,
+        kde=False,
+        color="#777777",
+        edgecolor="#444444",
+        linewidth=0.8,
+        ax=ax,
+    )
+
+    # Plot the KDE line scaled to the frequency/count axis
+    xmin, xmax = ax.get_xlim()
+    x_axis = np.linspace(xmin, xmax, 200)
+    bin_width = (xmax - xmin) / 31
+    kde_pdf = kde(x_axis) * len(scores_log) * bin_width
+    ax.plot(
+        x_axis,
+        kde_pdf,
+        color="#555555",
+        linewidth=1.5,
+        label="KDE smoothed joint density",
+    )
+
+    # Add the robustly fitted normal distribution curve
+    normal_pdf = norm.pdf(x_axis, loc=mu, scale=std) * len(scores_log) * bin_width
+    ax.plot(
+        x_axis,
+        normal_pdf,
+        color="crimson",
+        linestyle="-",
+        linewidth=1.5,
+        label="Robust Normal",
+    )
+
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.set_xlabel("Isolation Forest outlier score")
+    ax.set_xlabel("TabICL joint-density score (log10, lower = more anomalous)")
     ax.set_ylabel("Count")
-    outlier_percentage = np.sum(outlier == -1) / len(outlier) * 100
-    title_str = f"{config['ANALYSIS_NAME']}__{y_name}\nOutlier in data via Isolation Forest: {outlier_percentage:.1f}% potential outliers"
-    plt.title(title_str, fontsize=10)
+    ticks = np.geomspace(scores.min(), scores.max(), 6)
+    ax.set_xticks(np.log10(ticks))
+    ax.set_xticklabels([f"{t:.3g}" for t in ticks])
+    ax.axvline(
+        score_threshold_log,
+        color="black",
+        linestyle="--",
+        label=f"Robust Normal cutoff ({contamination:.1%})",
+    )
+    ax.legend(frameon=False, loc="upper right")
 
-    # Save
-    save_base_path = f"{store_path}/6_iForest"
-    excel_save_path = f"{save_base_path}.xlsx"
-    outlier_df.to_excel(excel_save_path, index=False)
-    png_save_path = f"{save_base_path}.png"
-    plt.savefig(png_save_path, dpi=300, bbox_inches="tight")
-    plt.show()
+    flagged_percentage = float(is_outlier.mean() * 100)
+    n_excluded = int((~valid_rows).sum())
+    ax.set_title(
+        f"{config['ANALYSIS_NAME']}__{y_name}\n"
+        "Outlier detection via TabICLUnsupervised: "
+        f"{flagged_percentage:.1f}% flagged "
+        f"({n_excluded} incomplete rows excluded)\n",
+        fontsize=10,
+    )
+
+    output_dir = Path(store_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result_data.to_excel(
+        output_dir / "6_tabicl_outlier_detection.xlsx",
+        index=True,
+    )
+    _save_and_show_figure(fig, output_dir / "6_tabicl_outlier_detection.png")
+
+    logging.info(
+        "[✓] Outlier detection finished: %d/%d complete observations flagged; "
+        "%d rows excluded due to incomplete features.",
+        int(is_outlier.sum()),
+        len(x_complete),
+        n_excluded,
+    )
 
 
 def main() -> None:
-    """Main function of exploratory data analysis."""
+    """Run all exploratory analyses for every configured target.
+
+    Returns
+    -------
+    None
+    """
     setup_logging()
     document_requirements()
-    configs_names = get_configs_names("../configs/oosi_configs_names.yaml")
-    configs = get_configs(get_configs_file_names(configs_names))
+
+    config_names = get_config_names(CONFIG_NAMES_PATH)
+    configs = get_configs(get_config_file_paths(config_names))
 
     for config in configs:
-        for target_idx, y_name in enumerate(config["Y_NAMES"]):
+        for y_name in config["Y_NAMES"]:
             analysis_name = f"{config['ANALYSIS_NAME']}__{y_name}"
-            logging.info(f"Exploratory Data Analysis started: {analysis_name}")
-            save_path = f"../eda/{analysis_name}"
-            os.makedirs(save_path, exist_ok=True)
+            logging.info("Starting exploratory data analysis: %s", analysis_name)
+            output_dir = DATA_OUTPUT_DIR / analysis_name
+            output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Plots
-            plot_1D_distribution(config, y_name, save_path)
+            plot_1d_distribution(config, y_name, output_dir)
+            plot_2d_distribution(config, y_name, output_dir)
+            plot_bivariate_correlation(config, y_name, output_dir)
+            plot_bivariate_predictions(config, y_name, output_dir)
+            plot_pca(config, y_name, output_dir)
+            plot_outlier_detection(config, y_name, output_dir)
 
-            plot_2D_distribution(config, y_name, save_path)
-
-            plot_joint_linear(config, y_name, save_path)
-
-            plot_pair_predictions(config, y_name, save_path)
-
-            plot_pca(config, y_name, save_path)
-
-            plot_outlier_detection(config, y_name, save_path)
-
-    logging.info("Exploratory Data Analysis finished.")
+    logging.info("[✓] Exploratory data analysis finished.")
 
 
 if __name__ == "__main__":
