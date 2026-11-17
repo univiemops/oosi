@@ -91,7 +91,9 @@ def document_requirements() -> None:
     logging.info("Package versions saved to: %s", requirements_path)
 
 
-def plot_parameter_distributions(results: dict[str, Any], store_path: str | Path) -> None:
+def plot_parameter_distributions(
+    results: dict[str, Any], store_path: str | Path
+) -> None:
     """Plot model hyperparameter distributions as histograms.
 
     Parameters
@@ -114,7 +116,7 @@ def plot_parameter_distributions(results: dict[str, Any], store_path: str | Path
     for idx, (name, data) in enumerate(optimized_params.items()):
         fig, ax = plt.subplots(figsize=(8, 5))
         use_log_scale = name.endswith(("path_smooth", "alpha", "C"))
-        
+
         sns.histplot(
             data=data,
             bins=30,
@@ -253,11 +255,20 @@ def plot_regression_scatter(results: dict[str, Any], store_path: str | Path) -> 
 
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.scatter(pred_values, true_values, zorder=2, alpha=0.1, color="#444444")
-    ax.plot([-10000, 10000], [-10000, 10000], color="#999999", zorder=3, linewidth=2, alpha=0.3)
+    ax.plot(
+        [-10000, 10000],
+        [-10000, 10000],
+        color="#999999",
+        zorder=3,
+        linewidth=2,
+        alpha=0.3,
+    )
     ax.set_aspect(1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.tick_params(axis="both", which="major", bottom=True, top=False, left=True, right=False)
+    ax.tick_params(
+        axis="both", which="major", bottom=True, top=False, left=True, right=False
+    )
     ax.grid(visible=True, which="major", axis="both", linestyle=":", alpha=0.5)
 
     true_values_range = max(true_values) - min(true_values)
@@ -268,7 +279,9 @@ def plot_regression_scatter(results: dict[str, Any], store_path: str | Path) -> 
     analysis_name = results["config"]["ANALYSIS_NAME"]
     pipe_name = results["params"]["pipe_name"]
     y_name = results["params"]["y_name"]
-    ax.set_title(f"{analysis_name} ({pipe_name} estimator predicting {y_name})\n", fontsize=10)
+    ax.set_title(
+        f"{analysis_name} ({pipe_name} estimator predicting {y_name})\n", fontsize=10
+    )
     ax.set_xlabel(f"Predicted {y_name}", fontsize=10)
     ax.set_ylabel(f"True {y_name}", fontsize=10)
 
@@ -288,7 +301,13 @@ def plot_regression_scatter(results: dict[str, Any], store_path: str | Path) -> 
         fontsize=10,
     )
     pval_mae_str = "p≤0.001" if pval_mae <= 0.001 else f"p={pval_mae:.3f}"
-    ax.text(0.3, 0.02, f"Original vs. shuffled: {pval_mae_str}", transform=ax.transAxes, fontsize=10)
+    ax.text(
+        0.3,
+        0.02,
+        f"Original vs. shuffled: {pval_mae_str}",
+        transform=ax.transAxes,
+        fontsize=10,
+    )
 
     _, pval_r2 = corrected_ttest(np.array(r2) - np.array(r2_sh))
     ax.text(
@@ -306,7 +325,13 @@ def plot_regression_scatter(results: dict[str, Any], store_path: str | Path) -> 
         fontsize=10,
     )
     pval_r2_str = "p≤0.001" if pval_r2 <= 0.001 else f"p={pval_r2:.3f}"
-    ax.text(0.02, 0.89, f"Original vs. shuffled: {pval_r2_str}", transform=ax.transAxes, fontsize=10)
+    ax.text(
+        0.02,
+        0.89,
+        f"Original vs. shuffled: {pval_r2_str}",
+        transform=ax.transAxes,
+        fontsize=10,
+    )
 
     save_path = store_path / "1_0_predictions"
     fig.savefig(f"{str(save_path)[:150]}.png", dpi=FIGURE_DPI, bbox_inches="tight")
@@ -420,7 +445,9 @@ def plot_regression_violin(results: dict[str, Any], store_path: str | Path) -> N
     plt.close(fig)
 
 
-def plot_classification_confusion(results: dict[str, Any], store_path: str | Path) -> None:
+def plot_classification_confusion(
+    results: dict[str, Any], store_path: str | Path
+) -> None:
     """Plot classification confusion matrices.
 
     Parameters
@@ -438,7 +465,7 @@ def plot_classification_confusion(results: dict[str, Any], store_path: str | Pat
     true_values_per_fold = [k["y_tst"] for k in results["total_scores"]]
     pred_values_per_fold = [k["y_pred"] for k in results["total_scores"]]
     true_values = np.concatenate(true_values_per_fold)
-    pred_values = np.concatenate(pred_values_per_fold) # noqa
+    pred_values = np.concatenate(pred_values_per_fold)  # noqa
 
     true_values_per_fold_sh = [k["y_tst"] for k in results["total_scores_sh"]]
     pred_values_per_fold_sh = [k["y_pred"] for k in results["total_scores_sh"]]
@@ -646,7 +673,9 @@ def plot_avg_shap_values(results: dict[str, Any], store_path: str | Path) -> Non
     """
     store_path = Path(store_path)
 
-    def _calculate_mean_abs_shap(folds_data: list, target_class: str) -> tuple[dict, dict]:
+    def _calculate_mean_abs_shap(
+        folds_data: list, target_class: str
+    ) -> tuple[dict, dict]:
         all_keys = {
             key
             for fold in folds_data
@@ -701,7 +730,11 @@ def plot_avg_shap_values(results: dict[str, Any], store_path: str | Path) -> Non
         if params["target_type"] in ["binary", "multiclass"]:
             title_str += f" (logit)\n class: {c_class}"
         title_lines_count = title_str.count("\n") + 1
-        x_names_max_len = max(len(str(i)) for i in shapii_se_sort.index) if not shapii_se_sort.empty else 10
+        x_names_max_len = (
+            max(len(str(i)) for i in shapii_se_sort.index)
+            if not shapii_se_sort.empty
+            else 10
+        )
 
         figsize = (
             x_names_max_len * 0.1 + 8,
@@ -741,7 +774,9 @@ def plot_avg_shap_values(results: dict[str, Any], store_path: str | Path) -> Non
         plt.close(fig)
 
 
-def plot_avg_shap_values_distributions(results: dict[str, Any], store_path: str | Path) -> None:
+def plot_avg_shap_values_distributions(
+    results: dict[str, Any], store_path: str | Path
+) -> None:
     """Plot average SHAP values distributions (global effects distribution).
 
     Parameters
@@ -757,7 +792,9 @@ def plot_avg_shap_values_distributions(results: dict[str, Any], store_path: str 
     """
     store_path = Path(store_path)
 
-    def _calculate_mean_abs_shap(folds_data: list, target_class: str) -> tuple[dict, dict]:
+    def _calculate_mean_abs_shap(
+        folds_data: list, target_class: str
+    ) -> tuple[dict, dict]:
         all_keys = {
             key
             for fold in folds_data
@@ -820,7 +857,11 @@ def plot_avg_shap_values_distributions(results: dict[str, Any], store_path: str 
             [shap_values_df_sort_melt, shap_values_sh_df_sort_melt], axis=0
         )
 
-        x_names_max_len = max([len(i) for i in shapii_folds_df.columns.to_list()]) if not shapii_folds_df.empty else 10
+        x_names_max_len = (
+            max([len(i) for i in shapii_folds_df.columns.to_list()])
+            if not shapii_folds_df.empty
+            else 10
+        )
         x_names_count = len(shapii_folds_df.columns.to_list())
         title_str = (
             f"{results['config']['ANALYSIS_NAME']} ({params['pipe_name']} estimator predicting {params['y_name']})\n"
@@ -923,7 +964,11 @@ def plot_single_shap_values(results: dict[str, Any], store_path: str | Path) -> 
             )
             normalized_single_shap_values.append(normalized_iv)
 
-        shapii_base = np.mean([k.baseline_value for k in single_shap_values]) if single_shap_values else 0.0
+        shapii_base = (
+            np.mean([k.baseline_value for k in single_shap_values])
+            if single_shap_values
+            else 0.0
+        )
 
         ax = shapiq.plot.beeswarm_plot(
             normalized_single_shap_values,
@@ -963,7 +1008,9 @@ def plot_single_shap_values(results: dict[str, Any], store_path: str | Path) -> 
         plt.close(fig)
 
 
-def plot_single_shap_values_dependences(results: dict[str, Any], store_path: str | Path) -> None:
+def plot_single_shap_values_dependences(
+    results: dict[str, Any], store_path: str | Path
+) -> None:
     """Plot single SHAP values dependence plots.
 
     Parameters
@@ -1015,7 +1062,11 @@ def plot_single_shap_values_dependences(results: dict[str, Any], store_path: str
             )
             normalized_single_shap_values.append(normalized_iv)
 
-        shapii_base = np.mean([k.baseline_value for k in single_shap_values]) if single_shap_values else 0.0
+        shapii_base = (
+            np.mean([k.baseline_value for k in single_shap_values])
+            if single_shap_values
+            else 0.0
+        )
 
         for key in all_keys:
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -1049,8 +1100,12 @@ def plot_single_shap_values_dependences(results: dict[str, Any], store_path: str
             ax.set_title(title_str, fontsize=10)
 
             key_str = format_key(key)
-            save_path = store_path / f"3_{c_class}_{key}_shap_values_dependency_{key_str}"
-            fig.savefig(f"{str(save_path)[:150]}.png", dpi=FIGURE_DPI, bbox_inches="tight")
+            save_path = (
+                store_path / f"3_{c_class}_{key}_shap_values_dependency_{key_str}"
+            )
+            fig.savefig(
+                f"{str(save_path)[:150]}.png", dpi=FIGURE_DPI, bbox_inches="tight"
+            )
             plt.show()
             plt.close(fig)
 
@@ -1085,7 +1140,9 @@ def main() -> None:
         for estimator_path in estimators_paths:
             estimator_dir = target_dir / estimator_path
             results_files_names = [
-                f.name for f in estimator_dir.iterdir() if f.is_file() and f.suffix == ".pkl"
+                f.name
+                for f in estimator_dir.iterdir()
+                if f.is_file() and f.suffix == ".pkl"
             ]
 
             results = {}

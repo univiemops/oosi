@@ -271,7 +271,9 @@ def get_configs_file_names(configs_names: list[str]) -> list[Path]:
     list of pathlib.Path
         List of constructed YAML configuration file paths.
     """
-    config_file_paths = [CONFIG_DIR / f"oosi_configs_{name}.yaml" for name in configs_names]
+    config_file_paths = [
+        CONFIG_DIR / f"oosi_configs_{name}.yaml" for name in configs_names
+    ]
     for path in config_file_paths:
         logging.info(f" -> Config file name to load: {path}")
     return config_file_paths
@@ -738,13 +740,15 @@ def explain_pipeline(
             random_state=RANDOM_STATE,
             verbose=False,
             sample_size=None,
-            categorical_features=list(range(len(config["X_CONTINUOUS_IND"]), len(config["X_NAMES"]))),
+            categorical_features=list(
+                range(len(config["X_CONTINUOUS_IND"]), len(config["X_NAMES"]))
+            ),
             joint_marginal_distribution=False,
-            )
+        )
 
         explanations[c_class] = explainer.explain_X(
             x_tst,
-            n_jobs=-1 if pipe_name in ["linear", "gb"] else 1,
+            n_jobs=1,
             budget=min(2**n_features, 10 * n_features),
         )
 
@@ -881,7 +885,9 @@ def main() -> None:
                     g_trn = g_df.iloc[train_idx].to_numpy().squeeze()
                     x_trn = x_df.iloc[train_idx].to_numpy().squeeze()
                     y_trn = y_df.iloc[train_idx].to_numpy().squeeze()
-                    _ = g_df.iloc[test_idx].to_numpy().squeeze()  # g_tst retained for splitter completeness
+                    _ = (
+                        g_df.iloc[test_idx].to_numpy().squeeze()
+                    )  # g_tst retained for splitter completeness
                     x_tst = x_df.iloc[test_idx].to_numpy().squeeze()
                     y_tst = y_df.iloc[test_idx].to_numpy().squeeze()
 
