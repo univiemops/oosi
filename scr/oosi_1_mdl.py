@@ -273,7 +273,7 @@ def get_preprocessor(
     preprocessor : sklearn.compose.ColumnTransformer
         Configured preprocessor applying target-specific transformations.
     """
-    if pipe_name == ["tabpfn"]:
+    if pipe_name == "tabpfn":
         continuous = Pipeline([("passthrough", "passthrough")])
         binary = Pipeline([("passthrough", "passthrough")])
         categorical = Pipeline([("passthrough", "passthrough")])
