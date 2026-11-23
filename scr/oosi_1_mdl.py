@@ -10,7 +10,6 @@ from __future__ import annotations
 import gc
 import importlib.metadata as metadata
 import logging
-import multiprocessing as mp
 import os
 import pickle as pkl
 import platform
@@ -24,7 +23,6 @@ import pandas as pd
 import torch
 import yaml
 
-from causilo import CausiloClassifier, CausiloRegressor
 from custom_splitter import ExtendedGroupShuffleSplit, RepeatedGroupKFold
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, uniform
@@ -38,8 +36,6 @@ from sklearn.model_selection import KFold, RandomizedSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, TargetEncoder
 from sklearn.utils import resample, shuffle
-from sklearn.utils.validation import check_is_fitted, validate_data
-from tabicl import TabICLClassifier, TabICLRegressor
 from tabpfn import TabPFNClassifier, TabPFNRegressor
 
 # Project paths relative to the working directory
@@ -66,104 +62,6 @@ os.environ["PYTHONWARNINGS"] = ",".join(env_rules)
 
 for msg in WARNING_MSGS:
     warnings.filterwarnings("ignore", message=f".*{msg}.*")
-
-
-def tabicl_predict_logits(self, X: np.ndarray) -> np.ndarray:
-    """Predict class logits for test samples.
-
-    Applies the ensemble of TabICL models to make predictions, with each ensemble
-    member providing predictions that are then averaged. The method:
-
-    1. Transforms input data using the fitted encoders
-    2. Applies the ensemble generator to create multiple views
-    3. Forwards each view through the model
-    4. Corrects for class shuffles
-    5. Averages predictions across ensemble members
-
-    Parameters
-    ----------
-    X : array-like of shape (n_samples, n_features)
-        Test samples for prediction. Columns that are entirely NaN are
-        treated as masked features and excluded from inference. This is
-        useful for computing SHAP values, where masked features are
-        represented as all-NaN columns.
-
-    Returns
-    -------
-    np.ndarray of shape (n_samples, n_classes)
-        Class logits for each test sample.
-    """
-    check_is_fitted(self)
-    if isinstance(X, np.ndarray) and len(X.shape) == 1:
-        raise ValueError("The provided input X is one-dimensional. Reshape your data.")
-
-    has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
-    has_training_data = (
-        hasattr(self, "ensemble_generator_")
-        and getattr(self.ensemble_generator_, "X_", None) is not None
-    )
-    if not has_kv_cache and not has_training_data:
-        raise RuntimeError(
-            "Cannot predict: this estimator was saved without training data and has no KV cache. "
-            "Predictions require either cached KV projections or the original training data. "
-            "Re-fit the estimator or load from a file saved with save_training_data=True or "
-            "save_kv_cache=True."
-        )
-
-    if self.n_jobs is not None:
-        assert self.n_jobs != 0
-        old_n_threads = torch.get_num_threads()
-        n_logical_cores = mp.cpu_count()
-
-        if self.n_jobs > 0:
-            if self.n_jobs > n_logical_cores:
-                warnings.warn(
-                    f"TabICL got n_jobs={self.n_jobs} but there are only {n_logical_cores} logical cores available. "
-                    f"Only {n_logical_cores} threads will be used."
-                )
-            n_threads = min(n_logical_cores, self.n_jobs)
-        else:
-            n_threads = max(1, n_logical_cores + 1 + self.n_jobs)
-
-        torch.set_num_threads(n_threads)
-
-    X = validate_data(self, X, reset=False, dtype=None, skip_check_array=True)
-    X = self.X_encoder_.transform(X)
-
-    has_kv_cache = hasattr(self, "model_kv_cache_") and self.model_kv_cache_ is not None
-
-    if has_kv_cache:
-        test_data = self.ensemble_generator_.transform(X, mode="test")
-        outputs = []
-        for norm_method, (Xs_test,) in test_data.items():
-            kv_cache = self.model_kv_cache_[norm_method]
-            outputs.append(self._batch_forward_with_cache(Xs_test, kv_cache))
-        outputs = np.concatenate(outputs, axis=0)
-    else:
-        data = self.ensemble_generator_.transform(X, mode="both")
-        outputs = []
-        for norm_method, (Xs, ys) in data.items():
-            feature_shuffles = self.ensemble_generator_.feature_shuffles_[norm_method]
-            outputs.append(self._batch_forward(Xs, ys, feature_shuffles))
-        outputs = np.concatenate(outputs, axis=0)
-
-    class_shuffles = []
-    for shuffles in self.ensemble_generator_.class_shuffles_.values():
-        class_shuffles.extend(shuffles)
-
-    n_estimators = len(class_shuffles)
-
-    avg = np.zeros_like(outputs[0])
-    for i, c_shuffle in enumerate(class_shuffles):
-        out = outputs[i]
-        avg += out[..., c_shuffle]
-
-    avg /= n_estimators
-
-    if self.n_jobs is not None:
-        torch.set_num_threads(old_n_threads)
-
-    return avg
 
 
 def decision_func(self: Any, X: np.ndarray) -> np.ndarray:
@@ -367,7 +265,7 @@ def get_preprocessor(
         'X_BINARY_IND', 'X_MULTICAT_IND').
     target_type : {'continuous', 'binary', 'multiclass'}
         The data type of the target variable, controlling target encoder behavior.
-    pipe_name : {'linear', 'gb', 'tabicl', 'tabpfn', 'causilo'}
+    pipe_name : {'gb', 'linear', 'tabpfn'}
         Identifier for the modeling pipeline architecture.
 
     Returns
@@ -375,7 +273,7 @@ def get_preprocessor(
     preprocessor : sklearn.compose.ColumnTransformer
         Configured preprocessor applying target-specific transformations.
     """
-    if pipe_name in ["causilo", "tabicl", "tabpfn"]:
+    if pipe_name == ["tabpfn"]:
         continuous = Pipeline([("passthrough", "passthrough")])
         binary = Pipeline([("passthrough", "passthrough")])
         categorical = Pipeline([("passthrough", "passthrough")])
@@ -444,7 +342,7 @@ def get_estimator_pipeline(
         The target data type indicating regression or classification.
     n_classes : int or None
         Number of target classes (for classification models).
-    pipe_name : {'linear', 'gb', 'tabicl', 'tabpfn', 'causilo'}
+    pipe_name : {'gb', 'linear', 'tabpfn'}
         Type of pipeline to construct.
 
     Returns
@@ -459,25 +357,7 @@ def get_estimator_pipeline(
     preprocessor = get_preprocessor(config, target_type, pipe_name=pipe_name)
     scorer = "r2" if target_type == "continuous" else "balanced_accuracy"
 
-    if pipe_name == "causilo":
-        space = {}
-        if target_type == "continuous":
-            predictor = CausiloRegressor(
-                n_estimators=10,
-                random_state=RANDOM_STATE,
-                use_kv_cache=True,
-                checkpoint_path=MODELS_DIR / "causilo_regressor/model.safetensors",
-            )
-        elif target_type in ["binary", "multiclass"]:
-            CausiloClassifier.decision_function = decision_func
-            predictor = CausiloClassifier(
-                n_estimators=10,
-                random_state=RANDOM_STATE,
-                use_kv_cache=True,
-                checkpoint_path=MODELS_DIR / "causilo_classifier/model.safetensors",
-            )
-
-    elif pipe_name == "gb":
+    if pipe_name == "gb":
         lgbm_params = {
             "boosting_type": "gbdt",
             "num_leaves": 100,
@@ -552,26 +432,6 @@ def get_estimator_pipeline(
                 "predictor__C": loguniform(0.001, 100),
                 "predictor__l1_ratio": uniform(0, 1),
             }
-
-    elif pipe_name == "tabicl":
-        space = {}
-        if target_type == "continuous":
-            predictor = TabICLRegressor(
-                n_estimators=10,
-                batch_size=None,
-                kv_cache=True,
-                model_path=MODELS_DIR / "tabicl-regressor-v2-20260212.ckpt",
-                random_state=RANDOM_STATE,
-            )
-        elif target_type in ["binary", "multiclass"]:
-            TabICLClassifier.decision_function = tabicl_predict_logits
-            predictor = TabICLClassifier(
-                n_estimators=10,
-                batch_size=None,
-                kv_cache=True,
-                model_path=MODELS_DIR / "tabicl-classifier-v2-20260212.ckpt",
-                random_state=RANDOM_STATE,
-            )
 
     elif pipe_name == "tabpfn":
         space = {}
@@ -707,7 +567,7 @@ def explain_pipeline(
         Training dataset sample used for background baseline.
     x_tst : numpy.ndarray of shape (n_samples_test, n_features)
         Test dataset sample to explain.
-    pipe_name : {'linear', 'gb', 'tabicl', 'tabpfn', 'causilo'}
+    pipe_name : {'gb', 'linear', 'tabpfn'}
         Identifier string of the model architecture.
     target_type : {'continuous', 'binary', 'multiclass'}
         Data type of the target variable.

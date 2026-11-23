@@ -657,6 +657,30 @@ def plot_classification_violin(results: dict[str, Any], store_path: str | Path) 
     plt.close(fig)
 
 
+def _calculate_mean_abs_shap(
+    folds_data: list, target_class: str, keys: set | None = None
+) -> tuple[dict, dict]:
+    if keys is None:
+        keys = {
+            key
+            for fold in folds_data
+            for item in fold.get(target_class, [])
+            for key in item.dict_values.keys()
+        }
+    fold_means = defaultdict(list)
+    for fold in folds_data:
+        class_fold = fold.get(target_class, [])
+        for key in keys:
+            if class_fold:
+                abs_vals = [
+                    np.abs(item.dict_values.get(key, 0.0)) for item in class_fold
+                ]
+                fold_means[key].append(np.nanmean(abs_vals))
+            else:
+                fold_means[key].append(0.0)
+    return {key: np.nanmean(vals) for key, vals in fold_means.items()}, fold_means
+
+
 def plot_avg_shap_values(results: dict[str, Any], store_path: str | Path) -> None:
     """Plot average absolute SHAP values (global effects).
 
@@ -673,36 +697,23 @@ def plot_avg_shap_values(results: dict[str, Any], store_path: str | Path) -> Non
     """
     store_path = Path(store_path)
 
-    def _calculate_mean_abs_shap(
-        folds_data: list, target_class: str
-    ) -> tuple[dict, dict]:
-        all_keys = {
-            key
-            for fold in folds_data
-            for item in fold.get(target_class, [])
-            for key in item.dict_values.keys()
-        }
-        fold_means = defaultdict(list)
-        for fold in folds_data:
-            class_fold = fold.get(target_class, [])
-            for key in all_keys:
-                abs_vals = [np.abs(item.dict_values.get(key, 0)) for item in class_fold]
-                if abs_vals:
-                    fold_means[key].append(np.nanmean(abs_vals))
-                else:
-                    fold_means[key].append(0.0)
-        return {key: np.nanmean(vals) for key, vals in fold_means.items()}, fold_means
-
     x_names = results["config"]["X_NAMES"]
     params = results["params"]
     format_key = lambda key: " x ".join(str(x_names[idx]) for idx in key)
 
     for c_class in params["classes"]:
+        shared_keys = {
+            key
+            for folds_data in (results["total_shapii"], results["total_shapii_sh"])
+            for fold in folds_data
+            for item in fold.get(c_class, [])
+            for key in item.dict_values.keys()
+        }
         shap_mean_abs, shap_folds_dct = _calculate_mean_abs_shap(
-            results["total_shapii"], c_class
+            results["total_shapii"], c_class, keys=shared_keys
         )
         shap_sh_mean_abs, shap_sh_folds_dct = _calculate_mean_abs_shap(
-            results["total_shapii_sh"], c_class
+            results["total_shapii_sh"], c_class, keys=shared_keys
         )
 
         shapii_base = shap_mean_abs.pop((), 0.0)
@@ -792,36 +803,23 @@ def plot_avg_shap_values_distributions(
     """
     store_path = Path(store_path)
 
-    def _calculate_mean_abs_shap(
-        folds_data: list, target_class: str
-    ) -> tuple[dict, dict]:
-        all_keys = {
-            key
-            for fold in folds_data
-            for item in fold.get(target_class, [])
-            for key in item.dict_values.keys()
-        }
-        fold_means = defaultdict(list)
-        for fold in folds_data:
-            class_fold = fold.get(target_class, [])
-            for key in all_keys:
-                abs_vals = [np.abs(item.dict_values.get(key, 0)) for item in class_fold]
-                if abs_vals:
-                    fold_means[key].append(np.nanmean(abs_vals))
-                else:
-                    fold_means[key].append(0.0)
-        return {key: np.nanmean(vals) for key, vals in fold_means.items()}, fold_means
-
     x_names = results["config"]["X_NAMES"]
     params = results["params"]
     format_key = lambda key: " x ".join(str(x_names[idx]) for idx in key)
 
     for c_class in params["classes"]:
+        shared_keys = {
+            key
+            for folds_data in (results["total_shapii"], results["total_shapii_sh"])
+            for fold in folds_data
+            for item in fold.get(c_class, [])
+            for key in item.dict_values.keys()
+        }
         shap_mean_abs, shap_folds_dct = _calculate_mean_abs_shap(
-            results["total_shapii"], c_class
+            results["total_shapii"], c_class, keys=shared_keys
         )
         shap_sh_mean_abs, shap_sh_folds_dct = _calculate_mean_abs_shap(
-            results["total_shapii_sh"], c_class
+            results["total_shapii_sh"], c_class, keys=shared_keys
         )
 
         shapii_base = shap_mean_abs.pop((), 0.0)
